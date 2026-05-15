@@ -1,87 +1,111 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import type { AuthUser, SSHConfig, Theme } from "@/types";
+import { THEMES } from "@/constants/themes";
+import { LoginScreen } from "@/components/LoginScreen";
+import { ConfigPicker } from "@/components/ConfigPicker";
+import { AdminPanel } from "@/components/AdminPanel";
+import { FileManager } from "@/components/FileManager";
 
-export default function Home() {
-  const [config, setConfig] = useState({
-    host: '127.0.0.1',
-    username: 'jefrex',
-    password: '78720710',
-    command: 'ls -la'
-  });
-  const [output, setOutput] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function Page() {
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [token, setToken] = useState<string>("");
+  const [config, setConfig] = useState<SSHConfig | null>(null);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
 
-  const runCommand = async () => {
-    setLoading(true);
-    setOutput('Connecting...');
+  const t = THEMES[theme];
+
+  useEffect(() => {
     try {
-      const res = await fetch('http://10.147.19.249:4000/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config)
-      });
+      const savedUser = sessionStorage.getItem("oserver_user");
+      const savedToken = sessionStorage.getItem("oserver_token");
+      const savedCfg = sessionStorage.getItem("oserver_config");
+      const savedTheme = sessionStorage.getItem("oserver_theme") as Theme;
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setOutput(`Помилка сервера: ${data.error || data.message}`);
-      } else {
-        setOutput(data.stdout || data.stderr || 'Команда виконана, але відповіді немає.');
+      if (savedUser && savedToken) {
+        setAuthUser(JSON.parse(savedUser));
+        setToken(savedToken);
       }
-    } catch (err) {
-      console.error(err);
-      setOutput('Мережева помилка (можливо, бекенд вимкнений): ' + err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (savedCfg) setConfig(JSON.parse(savedCfg));
+      if (savedTheme === "light" || savedTheme === "dark")
+        setTheme(savedTheme);
+    } catch {}
+
+    setSessionLoaded(true);
+  }, []);
+
+  function handleLogin(user: AuthUser, tok: string) {
+    setAuthUser(user);
+    setToken(tok);
+    try {
+      sessionStorage.setItem("oserver_user", JSON.stringify(user));
+      sessionStorage.setItem("oserver_token", tok);
+    } catch {}
+  }
+
+  function handleLogout() {
+    setAuthUser(null);
+    setToken("");
+    setConfig(null);
+    try {
+      sessionStorage.clear();
+    } catch {}
+  }
+
+  function handleConnect(cfg: SSHConfig) {
+    setConfig(cfg);
+    try {
+      sessionStorage.setItem("oserver_config", JSON.stringify(cfg));
+    } catch {}
+  }
+
+  function handleDisconnect() {
+    setConfig(null);
+    try {
+      sessionStorage.removeItem("oserver_config");
+    } catch {}
+  }
+
+  function handleThemeChange(newTheme: Theme) {
+    setTheme(newTheme);
+    try {
+      sessionStorage.setItem("oserver_theme", newTheme);
+    } catch {}
+  }
+
+  if (!sessionLoaded) return null;
+  if (!authUser)
+    return <LoginScreen onLogin={handleLogin} />;
+  if (!config)
+    return (
+      <ConfigPicker
+        token={token}
+        onConnect={handleConnect}
+        t={t}
+      />
+    );
+  if (showAdmin)
+    return (
+      <AdminPanel
+        token={token}
+        t={t}
+        onClose={() => setShowAdmin(false)}
+      />
+    );
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-8 bg-gray-50">
-      <div className="flex flex-col gap-2 w-full max-w-md bg-white p-6 rounded-lg shadow">
-        <h2 className="text-xl font-bold mb-4">SSH Web Terminal</h2>
-        <input 
-          className="border p-2 rounded text-black" 
-          placeholder="IP Host" 
-          value={config.host} 
-          onChange={e => setConfig({...config, host: e.target.value})} 
-        />
-        <input 
-          className="border p-2 rounded text-black" 
-          placeholder="Username" 
-          value={config.username} 
-          onChange={e => setConfig({...config, username: e.target.value})} 
-        />
-        <input 
-          className="border p-2 rounded text-black" 
-          type="password" 
-          placeholder="Password" 
-          value={config.password} 
-          onChange={e => setConfig({...config, password: e.target.value})} 
-        />
-        <input 
-          className="border p-2 rounded text-black" 
-          placeholder="Command" 
-          value={config.command} 
-          onChange={e => setConfig({...config, command: e.target.value})} 
-        />
-        
-        <button
-          onClick={runCommand}
-          disabled={loading}
-          className={`mt-4 px-4 py-2 rounded text-white ${loading ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'}`}
-        >
-          {loading ? 'Executing...' : 'Run Command'}
-        </button>
-      </div>
-
-      <div className="w-full max-w-2xl">
-        <p className="text-sm font-semibold mb-2 text-gray-600">Результат:</p>
-        <pre className="p-4 bg-black text-green-400 rounded-lg overflow-x-auto min-h-[100px] font-mono shadow-lg">
-          {output}
-        </pre>
-      </div>
-    </div>
+    <FileManager
+      authUser={authUser}
+      token={token}
+      config={config}
+      theme={theme}
+      onThemeChange={handleThemeChange}
+      onAdminClick={() => setShowAdmin(true)}
+      onLogout={handleLogout}
+      onDisconnect={handleDisconnect}
+    />
   );
 }

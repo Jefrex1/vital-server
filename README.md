@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# oServer — SSH File Manager
 
-## Getting Started
+## Структура проекту
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+project/
+├── server.js          ← Node.js бекенд (SSH + SFTP)
+├── FileManager.tsx    ← React компонент (Next.js / Vite)
+└── README.md
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Встановлення бекенду
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm init -y
+npm install express cors ssh2 multer
+node server.js
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Бекенд запуститься на **http://localhost:3001**
 
-## Learn More
+## Встановлення фронтенду
 
-To learn more about Next.js, take a look at the following resources:
+### Next.js (App Router)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Скопіюй `FileManager.tsx` в `app/page.tsx` або `components/FileManager.tsx`
+2. Встанови шрифт у `app/layout.tsx`:
+   ```tsx
+   import { Roboto_Mono } from 'next/font/google'
+   const mono = Roboto_Mono({ subsets: ['latin'] })
+   ```
+3. Запусти: `npm run dev`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Vite + React
 
-## Deploy on Vercel
+1. Скопіюй `FileManager.tsx` в `src/App.tsx`
+2. `npm run dev`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## API Endpoints
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Endpoint | Опис |
+|---|---|
+| `POST /run` | Виконати довільну SSH команду |
+| `POST /files/list` | Список файлів в директорії |
+| `POST /files/read` | Прочитати текстовий файл |
+| `POST /files/write` | Зберегти файл |
+| `POST /files/delete` | Видалити файл / директорію |
+| `POST /files/rename` | Перейменувати / перемістити |
+| `POST /files/mkdir` | Створити директорію |
+| `POST /files/download` | Скачати файл (SFTP stream) |
+| `POST /files/upload` | Завантажити файл (multipart) |
+| `POST /files/tree` | Дерево директорій для сайдбару |
+| `POST /system/metrics` | CPU/GPU temp, RAM, диски |
+
+## Тіло запиту (для всіх endpoints)
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 22,
+  "username": "jefrex",
+  "password": "your_password",
+  // + endpoint-специфічні поля
+}
+```
+
+## Функції FileManager
+
+- **Файловий менеджер** — grid перегляд, подвійний клік для входу в папку
+- **Редактор** — вбудований текстовий редактор з збереженням
+- **Термінал** — SSH термінал прямо в браузері
+- **Upload/Download** — через SFTP
+- **Метрики** — CPU, GPU температура, RAM, диски (оновлюється кожні 4с)
+- **Дерево** — авто-завантаження структури папок в сайдбар
+- **Пошук** — фільтрація файлів в реальному часі
+
+## Примітки
+
+- GPU температура потребує `nvidia-smi` на сервері
+- CPU температура читається з `/sys/class/thermal/thermal_zone0/temp`
+- Для продакшн-використання — додай JWT аутентифікацію та HTTPS
