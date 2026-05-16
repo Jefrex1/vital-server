@@ -63,7 +63,7 @@ export interface GroupRow {
   name: string;
   description: string | null;
   owner_id: number | null;
-  members: { id: number; username: string; role: string }[];
+  members: { id: number; username: string; role: string; group_role: string }[];
   configs: { id: number; label: string; host: string; port: number; username: string; auth_type: string }[];
 }
 

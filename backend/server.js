@@ -52,6 +52,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS group_members (
     group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     user_id     INTEGER NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+    group_role  TEXT    NOT NULL DEFAULT 'member', -- 'owner' | 'moderator' | 'member'
     PRIMARY KEY (group_id, user_id)
   );
 
@@ -117,6 +118,36 @@ if (userCount === 0) {
   db.prepare("INSERT INTO users (username, password, role) VALUES ('admin', ?, 'admin')").run(hashed);
   console.log('[oServer] Created default admin user: admin / admin');
 }
+
+// Migration: add group_role to group_members if missing
+try {
+  const cols = db.prepare('PRAGMA table_info(group_members)').all().map(c => c.name);
+  if (!cols.includes('group_role')) {
+    db.exec("ALTER TABLE group_members ADD COLUMN group_role TEXT NOT NULL DEFAULT 'member'");
+    const groupCols = db.prepare('PRAGMA table_info(groups)').all().map(c => c.name);
+    if (groupCols.includes('owner_id')) {
+      const groups = db.prepare('SELECT id, owner_id FROM groups WHERE owner_id IS NOT NULL').all();
+      for (const g of groups) {
+        db.prepare("UPDATE group_members SET group_role='owner' WHERE group_id=? AND user_id=?").run(g.id, g.owner_id);
+      }
+    }
+    console.log('[oServer] Migrated: added group_role to group_members');
+  }
+} catch(e) { console.error('[oServer] Migration error (group_role):', e.message); }
+
+// Migration: restore owner_id in groups if a previous version removed it
+try {
+  const groupCols = db.prepare('PRAGMA table_info(groups)').all().map(c => c.name);
+  if (!groupCols.includes('owner_id')) {
+    db.exec("ALTER TABLE groups ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL");
+    // Restore owner_id from group_members where group_role = 'owner'
+    const owners = db.prepare("SELECT group_id, user_id FROM group_members WHERE group_role='owner'").all();
+    for (const o of owners) {
+      db.prepare('UPDATE groups SET owner_id=? WHERE id=?').run(o.user_id, o.group_id);
+    }
+    console.log('[oServer] Migrated: restored owner_id in groups');
+  }
+} catch(e) { console.error('[oServer] Migration error (owner_id):', e.message); }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function auditLog(userId, username, action, target, detail, ip) {
@@ -354,7 +385,7 @@ app.get('/groups', authMiddleware, (req, res) => {
   const result = groups.map(g => ({
     ...g,
     members: db.prepare(`
-      SELECT u.id, u.username, u.role FROM group_members gm
+      SELECT u.id, u.username, u.role, gm.group_role FROM group_members gm
       JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ?
     `).all(g.id),
     configs: db.prepare(`
@@ -370,8 +401,8 @@ app.post('/groups', authMiddleware, (req, res) => {
   if (!name) return res.status(400).json({ error: 'Name required' });
   try {
     const result = db.prepare('INSERT INTO groups (name, description, owner_id) VALUES (?,?,?)').run(name, description || null, req.user.id);
-    // Auto-add creator as member
-    db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)').run(result.lastInsertRowid, req.user.id);
+    // Auto-add creator as member with owner role
+    db.prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, group_role) VALUES (?,?,'owner')").run(result.lastInsertRowid, req.user.id);
     auditLog(req.user.id, req.user.username, 'create_group', name, null, getClientIp(req));
     res.json({ id: result.lastInsertRowid, name, description, owner_id: req.user.id });
   } catch (e) {
@@ -395,11 +426,24 @@ app.post('/groups/:id/members', authMiddleware, (req, res) => {
   if (!g) return res.status(404).json({ error: 'Not found' });
   if (req.user.role !== 'admin' && g.owner_id !== req.user.id)
     return res.status(403).json({ error: 'Only group owner or admin can add members' });
-  const { user_id } = req.body;
+  const { user_id, group_role } = req.body;
+  const safeRole = ['owner','moderator','member'].includes(group_role) ? group_role : 'member';
   try {
-    db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)').run(req.params.id, user_id);
+    db.prepare('INSERT OR REPLACE INTO group_members (group_id, user_id, group_role) VALUES (?,?,?)').run(req.params.id, user_id, safeRole);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Change member role (owner only)
+app.patch('/groups/:id/members/:uid/role', authMiddleware, (req, res) => {
+  const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
+  if (!g) return res.status(404).json({ error: 'Not found' });
+  if (g.owner_id !== req.user.id && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Only group owner can change roles' });
+  const { group_role } = req.body;
+  const safeRole = ['owner','moderator','member'].includes(group_role) ? group_role : 'member';
+  db.prepare('UPDATE group_members SET group_role=? WHERE group_id=? AND user_id=?').run(safeRole, req.params.id, req.params.uid);
+  res.json({ ok: true });
 });
 
 app.delete('/groups/:id/members/:uid', authMiddleware, (req, res) => {
@@ -497,7 +541,7 @@ app.patch('/invites/:id', authMiddleware, (req, res) => {
   );
 
   if (action === 'accept') {
-    db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)').run(invite.group_id, req.user.id);
+    db.prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, group_role) VALUES (?,?,'member')").run(invite.group_id, req.user.id);
     auditLog(req.user.id, req.user.username, 'group_join_accepted', invite.group_id, null, getClientIp(req));
   } else {
     auditLog(req.user.id, req.user.username, 'group_join_declined', invite.group_id, null, getClientIp(req));
@@ -1043,4 +1087,4 @@ app.post('/files/tree', authMiddleware, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`oServer backend on port ${PORT}\nDefault login: admin / admin`));
+server.listen(PORT, '0.0.0.0', () => console.log(`oServer backend on port ${PORT}`));

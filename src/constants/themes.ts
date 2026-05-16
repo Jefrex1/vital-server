@@ -107,5 +107,13 @@ export const THEMES = {
   },
 };
 
-export const API = "http://localhost:3001";
-export const WS_URL = "ws://localhost:3001";
+const DEFAULT_API = "http://localhost:3001";
+const DEFAULT_WS = "ws://localhost:3001";
+
+export const API = (typeof window !== 'undefined')
+  ? `${window.location.protocol}//${window.location.hostname}:3001`
+  : DEFAULT_API;
+
+export const WS_URL = (typeof window !== 'undefined')
+  ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:3001`
+  : DEFAULT_WS;

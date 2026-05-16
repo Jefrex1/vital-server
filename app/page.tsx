@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { AuthUser, SSHConfig, Theme } from "@/types";
 import { THEMES } from "@/constants/themes";
 import { LoginScreen } from "@/components/LoginScreen";
@@ -14,6 +14,22 @@ import { AccountSettings } from "@/components/AccountSettings";
 type Screen = "login" | "register";
 type AppView = "picker" | "groups" | "account" | "file-manager" | "admin";
 
+const VIEW_TO_PATH: Record<AppView, string> = {
+  picker: "/",
+  groups: "/groups",
+  account: "/account",
+  "file-manager": "/files",
+  admin: "/admin",
+};
+
+const PATH_TO_VIEW: Record<string, AppView> = {
+  "/": "picker",
+  "/groups": "groups",
+  "/account": "account",
+  "/files": "file-manager",
+  "/admin": "admin",
+};
+
 export default function Page() {
   const [theme, setTheme] = useState<Theme>("dark");
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
@@ -25,6 +41,32 @@ export default function Page() {
 
   const t = THEMES[theme];
 
+  // Navigate with URL update
+  const navigate = useCallback((newView: AppView, replace = false) => {
+    const path = VIEW_TO_PATH[newView];
+    if (replace) {
+      window.history.replaceState({ view: newView }, "", path);
+    } else {
+      window.history.pushState({ view: newView }, "", path);
+    }
+    setView(newView);
+  }, []);
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const v = e.state?.view as AppView | undefined;
+      if (v) setView(v);
+      else {
+        const fromPath = PATH_TO_VIEW[window.location.pathname];
+        setView(fromPath || "picker");
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // On load — restore session and set initial URL state
   useEffect(() => {
     try {
       const savedUser = sessionStorage.getItem("oserver_user");
@@ -38,6 +80,12 @@ export default function Page() {
       }
       if (savedCfg) setConfig(JSON.parse(savedCfg));
       if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
+
+      // Restore view from URL
+      const fromPath = PATH_TO_VIEW[window.location.pathname];
+      const initialView: AppView = fromPath || "picker";
+      setView(initialView);
+      window.history.replaceState({ view: initialView }, "", VIEW_TO_PATH[initialView]);
     } catch {}
     setSessionLoaded(true);
   }, []);
@@ -46,7 +94,7 @@ export default function Page() {
     setAuthUser(user);
     setToken(tok);
     setScreen("login");
-    setView("picker");
+    navigate("picker", true);
     try {
       sessionStorage.setItem("oserver_user", JSON.stringify(user));
       sessionStorage.setItem("oserver_token", tok);
@@ -58,19 +106,19 @@ export default function Page() {
     setToken("");
     setConfig(null);
     setScreen("login");
-    setView("picker");
+    navigate("picker", true);
     try { sessionStorage.clear(); } catch {}
   }
 
   function handleConnect(cfg: SSHConfig) {
     setConfig(cfg);
-    setView("file-manager");
+    navigate("file-manager");
     try { sessionStorage.setItem("oserver_config", JSON.stringify(cfg)); } catch {}
   }
 
   function handleDisconnect() {
     setConfig(null);
-    setView("picker");
+    navigate("picker");
     try { sessionStorage.removeItem("oserver_config"); } catch {}
   }
 
@@ -81,7 +129,6 @@ export default function Page() {
 
   if (!sessionLoaded) return null;
 
-  // Not logged in
   if (!authUser) {
     if (screen === "register") {
       return <RegisterScreen onRegister={handleLogin} onBackToLogin={() => setScreen("login")} />;
@@ -89,43 +136,18 @@ export default function Page() {
     return <LoginScreen onLogin={handleLogin} onRegister={() => setScreen("register")} />;
   }
 
-  // Groups view — accessible without server
   if (view === "groups") {
-    return (
-      <GroupsPanel
-        token={token}
-        authUser={authUser}
-        t={t}
-        onClose={() => setView("picker")}
-      />
-    );
+    return <GroupsPanel token={token} authUser={authUser} t={t} onClose={() => navigate("picker")} />;
   }
 
-  // Account settings — accessible without server
   if (view === "account") {
-    return (
-      <AccountSettings
-        token={token}
-        authUser={authUser}
-        t={t}
-        onClose={() => setView("picker")}
-        onThemeChange={handleThemeChange}
-      />
-    );
+    return <AccountSettings token={token} authUser={authUser} t={t} onClose={() => navigate("picker")} onThemeChange={handleThemeChange} />;
   }
 
-  // Admin panel
   if (view === "admin") {
-    return (
-      <AdminPanel
-        token={token}
-        t={t}
-        onClose={() => setView(config ? "file-manager" : "picker")}
-      />
-    );
+    return <AdminPanel token={token} t={t} onClose={() => navigate(config ? "file-manager" : "picker")} />;
   }
 
-  // File manager (needs server)
   if (view === "file-manager" && config) {
     return (
       <FileManager
@@ -134,25 +156,24 @@ export default function Page() {
         config={config}
         theme={theme}
         onThemeChange={handleThemeChange}
-        onAdminClick={() => setView("admin")}
-        onGroupsClick={() => setView("groups")}
-        onAccountClick={() => setView("account")}
+        onAdminClick={() => navigate("admin")}
+        onGroupsClick={() => navigate("groups")}
+        onAccountClick={() => navigate("account")}
         onLogout={handleLogout}
         onDisconnect={handleDisconnect}
       />
     );
   }
 
-  // Server picker (default after login)
   return (
     <ConfigPicker
       token={token}
       authUser={authUser}
       onConnect={handleConnect}
       t={t}
-      onGroupsClick={() => setView("groups")}
-      onAccountClick={() => setView("account")}
-      onAdminClick={authUser.role === "admin" ? () => setView("admin") : undefined}
+      onGroupsClick={() => navigate("groups")}
+      onAccountClick={() => navigate("account")}
+      onAdminClick={authUser.role === "admin" ? () => navigate("admin") : undefined}
       onLogout={handleLogout}
     />
   );
