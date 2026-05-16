@@ -1,23 +1,34 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { SSHConfig } from "@/types";
+import { SSHConfig, AuthUser, GroupInvite } from "@/types";
 import { API, THEMES } from "@/constants/themes";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
 
 interface ConfigPickerProps {
   token: string;
+  authUser: AuthUser;
   onConnect: (cfg: SSHConfig) => void;
   t: typeof THEMES.dark;
+  onGroupsClick: () => void;
+  onAccountClick: () => void;
+  onAdminClick?: () => void;
+  onLogout: () => void;
 }
 
 export function ConfigPicker({
   token,
+  authUser,
   onConnect,
   t,
+  onGroupsClick,
+  onAccountClick,
+  onAdminClick,
+  onLogout,
 }: ConfigPickerProps) {
   const [configs, setConfigs] = useState<SSHConfig[]>([]);
+  const [pendingInvites, setPendingInvites] = useState(0);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
     label: "",
@@ -37,11 +48,12 @@ export function ConfigPicker({
   };
 
   async function load() {
-    const res = await fetch(`${API}/configs`, { headers: hdr });
-    if (res.ok) {
-      const data = await res.json();
-      setConfigs(data);
-    }
+    const [cRes, iRes] = await Promise.all([
+      fetch(`${API}/configs`, { headers: hdr }),
+      fetch(`${API}/invites`, { headers: hdr }),
+    ]);
+    if (cRes.ok) setConfigs(await cRes.json());
+    if (iRes.ok) { const inv = await iRes.json(); setPendingInvites(inv.length); }
   }
 
   useEffect(() => {
@@ -99,51 +111,57 @@ export function ConfigPicker({
           border: `1px solid ${t.border2}`,
           borderRadius: 8,
           padding: "28px 32px",
-          width: "min(480px, 94vw)",
+          width: "min(520px, 94vw)",
           display: "flex",
           flexDirection: "column",
           gap: 16,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={t.red}
-              strokeWidth="2.5"
-            >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={t.red} strokeWidth="2.5">
               <polyline points="4 17 10 11 4 5" />
               <line x1="12" y1="19" x2="20" y2="19" />
             </svg>
             <span style={{ fontSize: 14, color: t.text }}>oServer</span>
-            <span style={{ fontSize: 11, color: t.textDim }}>
-              — pick connection
-            </span>
+            <span style={{ fontSize: 11, color: t.textDim }}>— підключення</span>
           </div>
-          <button
-            onClick={() => setShowAdd((s) => !s)}
-            style={{
-              background: t.bg4,
-              border: `1px solid ${t.border2}`,
-              borderRadius: 4,
-              padding: "5px 12px",
-              fontSize: 12,
-              color: t.textMid,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            + Add
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <button onClick={() => setShowAdd((s) => !s)}
+              style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 12, color: t.textMid, cursor: "pointer", fontFamily: "inherit" }}>
+              + Додати
+            </button>
+          </div>
+        </div>
+
+        {/* Navigation row */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={onGroupsClick}
+            style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
+            👥 Групи
+            {pendingInvites > 0 && <span style={{ background: t.red, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 10 }}>{pendingInvites}</span>}
           </button>
+          <button onClick={onAccountClick}
+            style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
+            ⚙ Акаунт
+          </button>
+          {onAdminClick && (
+            <button onClick={onAdminClick}
+              style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
+              🛡 Адмін
+            </button>
+          )}
+          <button onClick={onLogout}
+            style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.red, cursor: "pointer", fontFamily: "inherit", marginLeft: "auto" }}>
+            Вийти
+          </button>
+        </div>
+
+        {/* User info */}
+        <div style={{ background: t.bg4, border: `1px solid ${t.border}`, borderRadius: 4, padding: "8px 12px", fontSize: 11, color: t.textDim }}>
+          Увійшли як <span style={{ color: t.text }}>@{authUser.username}</span>
+          {authUser.role === "admin" && <span style={{ color: t.red, marginLeft: 8 }}>[admin]</span>}
         </div>
 
         {showAdd && (

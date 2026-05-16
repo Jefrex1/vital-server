@@ -32,10 +32,20 @@ db.exec(`
     last_login  INTEGER
   );
 
+  CREATE TABLE IF NOT EXISTS user_settings (
+    user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    display_name TEXT,
+    email       TEXT,
+    bio         TEXT,
+    theme       TEXT    NOT NULL DEFAULT 'dark',
+    updated_at  INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
   CREATE TABLE IF NOT EXISTS groups (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL UNIQUE,
     description TEXT,
+    owner_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at  INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -43,6 +53,16 @@ db.exec(`
     group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     user_id     INTEGER NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
     PRIMARY KEY (group_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS group_join_requests (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    from_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status      TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'accepted' | 'declined'
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE(group_id, from_user_id, to_user_id)
   );
 
   CREATE TABLE IF NOT EXISTS ssh_configs (
@@ -345,28 +365,36 @@ app.get('/groups', authMiddleware, (req, res) => {
   res.json(result);
 });
 
-app.post('/groups', authMiddleware, adminMiddleware, (req, res) => {
+app.post('/groups', authMiddleware, (req, res) => {
   const { name, description } = req.body;
   if (!name) return res.status(400).json({ error: 'Name required' });
   try {
-    const result = db.prepare('INSERT INTO groups (name, description) VALUES (?,?)').run(name, description || null);
+    const result = db.prepare('INSERT INTO groups (name, description, owner_id) VALUES (?,?,?)').run(name, description || null, req.user.id);
+    // Auto-add creator as member
+    db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)').run(result.lastInsertRowid, req.user.id);
     auditLog(req.user.id, req.user.username, 'create_group', name, null, getClientIp(req));
-    res.json({ id: result.lastInsertRowid, name, description });
+    res.json({ id: result.lastInsertRowid, name, description, owner_id: req.user.id });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Group already exists' });
     res.status(500).json({ error: e.message });
   }
 });
 
-app.delete('/groups/:id', authMiddleware, adminMiddleware, (req, res) => {
+app.delete('/groups/:id', authMiddleware, (req, res) => {
   const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!g) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && g.owner_id !== req.user.id)
+    return res.status(403).json({ error: 'Only group owner or admin can delete' });
   db.prepare('DELETE FROM groups WHERE id = ?').run(req.params.id);
   auditLog(req.user.id, req.user.username, 'delete_group', g.name, null, getClientIp(req));
   res.json({ ok: true });
 });
 
-app.post('/groups/:id/members', authMiddleware, adminMiddleware, (req, res) => {
+app.post('/groups/:id/members', authMiddleware, (req, res) => {
+  const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
+  if (!g) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && g.owner_id !== req.user.id)
+    return res.status(403).json({ error: 'Only group owner or admin can add members' });
   const { user_id } = req.body;
   try {
     db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)').run(req.params.id, user_id);
@@ -374,13 +402,117 @@ app.post('/groups/:id/members', authMiddleware, adminMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/groups/:id/members/:uid', authMiddleware, adminMiddleware, (req, res) => {
+app.delete('/groups/:id/members/:uid', authMiddleware, (req, res) => {
+  const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
+  if (!g) return res.status(404).json({ error: 'Not found' });
+  const isSelf = Number(req.params.uid) === req.user.id;
+  if (req.user.role !== 'admin' && g.owner_id !== req.user.id && !isSelf)
+    return res.status(403).json({ error: 'Forbidden' });
   db.prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?').run(req.params.id, req.params.uid);
   res.json({ ok: true });
 });
 
+// ─── Group join requests ───────────────────────────────────────────────────────
+// Send a join request to a user (by username or id) to invite them to a group
+app.post('/groups/:id/invite', authMiddleware, (req, res) => {
+  const groupId = req.params.id;
+  const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found' });
+
+  // Only admin or group owner can send invites
+  if (req.user.role !== 'admin' && group.owner_id !== req.user.id) {
+    return res.status(403).json({ error: 'Only group owner or admin can invite' });
+  }
+
+  const { username, user_id } = req.body;
+  let targetUser;
+  if (user_id) {
+    targetUser = db.prepare('SELECT id, username FROM users WHERE id = ?').get(user_id);
+  } else if (username) {
+    targetUser = db.prepare('SELECT id, username FROM users WHERE username = ?').get(username);
+  }
+  if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+  // Check if already a member
+  const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(groupId, targetUser.id);
+  if (isMember) return res.status(409).json({ error: 'User is already a member' });
+
+  // Check if pending invite already exists
+  const existing = db.prepare(
+    "SELECT id FROM group_join_requests WHERE group_id = ? AND to_user_id = ? AND status = 'pending'"
+  ).get(groupId, targetUser.id);
+  if (existing) return res.status(409).json({ error: 'Invite already pending' });
+
+  try {
+    const result = db.prepare(
+      'INSERT INTO group_join_requests (group_id, from_user_id, to_user_id, status) VALUES (?,?,?,?)'
+    ).run(groupId, req.user.id, targetUser.id, 'pending');
+    auditLog(req.user.id, req.user.username, 'group_invite', group.name, `invited=${targetUser.username}`, getClientIp(req));
+    res.json({ id: result.lastInsertRowid });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get pending invites for current user
+app.get('/invites', authMiddleware, (req, res) => {
+  const invites = db.prepare(`
+    SELECT r.id, r.group_id, r.from_user_id, r.created_at, r.status,
+           g.name as group_name, g.description as group_description,
+           u.username as from_username
+    FROM group_join_requests r
+    JOIN groups g ON g.id = r.group_id
+    JOIN users u ON u.id = r.from_user_id
+    WHERE r.to_user_id = ? AND r.status = 'pending'
+    ORDER BY r.created_at DESC
+  `).all(req.user.id);
+  res.json(invites);
+});
+
+// Get all pending invites (admin only)
+app.get('/invites/all', authMiddleware, adminMiddleware, (req, res) => {
+  const invites = db.prepare(`
+    SELECT r.*, g.name as group_name, uf.username as from_username, ut.username as to_username
+    FROM group_join_requests r
+    JOIN groups g ON g.id = r.group_id
+    JOIN users uf ON uf.id = r.from_user_id
+    JOIN users ut ON ut.id = r.to_user_id
+    ORDER BY r.created_at DESC
+  `).all();
+  res.json(invites);
+});
+
+// Accept or decline an invite
+app.patch('/invites/:id', authMiddleware, (req, res) => {
+  const invite = db.prepare('SELECT * FROM group_join_requests WHERE id = ?').get(req.params.id);
+  if (!invite) return res.status(404).json({ error: 'Invite not found' });
+  if (invite.to_user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+  if (invite.status !== 'pending') return res.status(400).json({ error: 'Invite already processed' });
+
+  const { action } = req.body; // 'accept' | 'decline'
+  if (!['accept', 'decline'].includes(action)) return res.status(400).json({ error: 'action must be accept or decline' });
+
+  db.prepare('UPDATE group_join_requests SET status = ? WHERE id = ?').run(
+    action === 'accept' ? 'accepted' : 'declined', req.params.id
+  );
+
+  if (action === 'accept') {
+    db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)').run(invite.group_id, req.user.id);
+    auditLog(req.user.id, req.user.username, 'group_join_accepted', invite.group_id, null, getClientIp(req));
+  } else {
+    auditLog(req.user.id, req.user.username, 'group_join_declined', invite.group_id, null, getClientIp(req));
+  }
+
+  res.json({ ok: true });
+});
+
 // ─── Group configs (servers assigned to group) ────────────────────────────────
-app.post('/groups/:id/configs', authMiddleware, adminMiddleware, (req, res) => {
+app.post('/groups/:id/configs', authMiddleware, (req, res) => {
+  const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
+  if (!g) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && g.owner_id !== req.user.id)
+    return res.status(403).json({ error: 'Only group owner or admin can add servers' });
+
   const { config_id } = req.body;
   if (!config_id) return res.status(400).json({ error: 'config_id required' });
   try {
@@ -401,9 +533,47 @@ app.post('/groups/:id/configs', authMiddleware, adminMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/groups/:id/configs/:cid', authMiddleware, adminMiddleware, (req, res) => {
+app.delete('/groups/:id/configs/:cid', authMiddleware, (req, res) => {
+  const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
+  if (!g) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && g.owner_id !== req.user.id)
+    return res.status(403).json({ error: 'Only group owner or admin can remove servers' });
   db.prepare('DELETE FROM group_configs WHERE group_id = ? AND config_id = ?').run(req.params.id, req.params.cid);
   auditLog(req.user.id, req.user.username, 'group_remove_config', req.params.id, `config_id=${req.params.cid}`, getClientIp(req));
+  res.json({ ok: true });
+});
+
+// ─── Account Settings ─────────────────────────────────────────────────────────
+app.get('/account/settings', authMiddleware, (req, res) => {
+  const settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
+  res.json(settings || { user_id: req.user.id, display_name: null, email: null, bio: null, theme: 'dark' });
+});
+
+app.patch('/account/settings', authMiddleware, async (req, res) => {
+  const { display_name, email, bio, theme } = req.body;
+  const existing = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
+  if (existing) {
+    db.prepare('UPDATE user_settings SET display_name=?, email=?, bio=?, theme=?, updated_at=unixepoch() WHERE user_id=?')
+      .run(display_name || null, email || null, bio || null, theme || 'dark', req.user.id);
+  } else {
+    db.prepare('INSERT INTO user_settings (user_id, display_name, email, bio, theme) VALUES (?,?,?,?,?)')
+      .run(req.user.id, display_name || null, email || null, bio || null, theme || 'dark');
+  }
+  res.json({ ok: true });
+});
+
+app.patch('/account/password', authMiddleware, async (req, res) => {
+  const { current_password, new_password } = req.body;
+  if (!current_password || !new_password) return res.status(400).json({ error: 'Both passwords required' });
+  if (new_password.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  const valid = bcrypt.compareSync(current_password, user.password);
+  if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+  const hashed = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
+  db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, req.user.id);
+  auditLog(req.user.id, req.user.username, 'change_password', null, null, getClientIp(req));
   res.json({ ok: true });
 });
 
@@ -411,21 +581,16 @@ app.delete('/groups/:id/configs/:cid', authMiddleware, adminMiddleware, (req, re
 app.get('/configs', authMiddleware, (req, res) => {
   const { id: userId, role } = req.user;
 
-  let rows;
-  if (role === 'admin') {
-    rows = db.prepare('SELECT * FROM ssh_configs ORDER BY id').all();
-  } else {
-    // Own configs + configs shared to user's groups via group_configs + global shared
-    rows = db.prepare(`
-      SELECT DISTINCT sc.* FROM ssh_configs sc
-      LEFT JOIN group_configs gc ON gc.config_id = sc.id
-      LEFT JOIN group_members gm ON gm.group_id = gc.group_id AND gm.user_id = ?
-      WHERE sc.owner_id = ?
-        OR gm.user_id = ?
-        OR (sc.owner_id IS NULL AND sc.group_id IS NULL)
-      ORDER BY sc.id
-    `).all(userId, userId, userId);
-  }
+  // All users (including admin) see only their own configs + group-shared configs
+  const rows = db.prepare(`
+    SELECT DISTINCT sc.* FROM ssh_configs sc
+    LEFT JOIN group_configs gc ON gc.config_id = sc.id
+    LEFT JOIN group_members gm ON gm.group_id = gc.group_id AND gm.user_id = ?
+    WHERE sc.owner_id = ?
+      OR gm.user_id = ?
+      OR (sc.owner_id IS NULL AND sc.group_id IS NULL)
+    ORDER BY sc.id
+  `).all(userId, userId, userId);
 
   const result = rows.map(r => ({ ...r, ssh_key: r.ssh_key ? '[KEY SET]' : null, password: r.password ? '[PASSWORD SET]' : null }));
   res.json(result);

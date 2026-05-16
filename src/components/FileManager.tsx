@@ -27,6 +27,8 @@ interface FileManagerProps {
   theme: "dark" | "light";
   onThemeChange: (theme: "dark" | "light") => void;
   onAdminClick: () => void;
+  onGroupsClick: () => void;
+  onAccountClick: () => void;
   onLogout: () => void;
   onDisconnect: () => void;
 }
@@ -38,6 +40,8 @@ export function FileManager({
   theme,
   onThemeChange,
   onAdminClick,
+  onGroupsClick,
+  onAccountClick,
   onLogout,
   onDisconnect,
 }: FileManagerProps) {
@@ -981,19 +985,30 @@ export function FileManager({
                   gap: 5,
                 }}
               >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                 </svg>
                 {!isMobile && "Admin"}
               </button>
             )}
+
+            {/* Groups */}
+            <button
+              className="topbtn"
+              onClick={onGroupsClick}
+              style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 11px", fontSize: isMobile ? 11 : 12, color: t.textMid, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
+            >
+              👥{!isMobile && " Групи"}
+            </button>
+
+            {/* Account */}
+            <button
+              className="topbtn"
+              onClick={onAccountClick}
+              style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 11px", fontSize: isMobile ? 11 : 12, color: t.textMid, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
+            >
+              ⚙{!isMobile && " Акаунт"}
+            </button>
 
             {/* Terminal */}
             <button

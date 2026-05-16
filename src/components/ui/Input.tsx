@@ -4,50 +4,54 @@ import React from "react";
 import { THEMES } from "@/constants/themes";
 
 interface InputProps {
-  label: string;
+  label?: string;
   value: string;
-  onChange: (v: string) => void;
+  // підтримує обидва формати: (v: string) => void  і  React.ChangeEventHandler
+  onChange: ((v: string) => void) | ((e: React.ChangeEvent<HTMLInputElement>) => void);
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
   type?: string;
   placeholder?: string;
   t: typeof THEMES.dark;
 }
 
-export function Input({
-  label,
-  value,
-  onChange,
-  type = "text",
-  placeholder = "",
-  t,
-}: InputProps) {
+export function Input({ label, value, onChange, onKeyDown, type = "text", placeholder = "", t }: InputProps) {
+  const inputStyle: React.CSSProperties = {
+    background: t.inputBg,
+    border: `1px solid ${t.border2}`,
+    borderRadius: 4,
+    padding: "8px 12px",
+    color: t.text,
+    fontFamily: "inherit",
+    fontSize: 13,
+    outline: "none",
+    width: "100%",
+    boxSizing: "border-box",
+  };
+
+  // Detect which signature by calling with a dummy check — safest is to always pass string
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    (onChange as any)(e.target.value);
+  }
+
+  const input = (
+    <input
+      type={type}
+      value={value}
+      onChange={handleChange}
+      onKeyDown={onKeyDown}
+      placeholder={placeholder}
+      style={inputStyle}
+    />
+  );
+
+  if (!label) return input;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-      <label
-        style={{
-          fontSize: 10,
-          color: t.textDim,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-        }}
-      >
+      <label style={{ fontSize: 10, color: t.textDim, letterSpacing: "0.08em", textTransform: "uppercase" }}>
         {label}
       </label>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        style={{
-          background: t.inputBg,
-          border: `1px solid ${t.border2}`,
-          borderRadius: 4,
-          padding: "8px 12px",
-          color: t.text,
-          fontFamily: "inherit",
-          fontSize: 13,
-          outline: "none",
-        }}
-      />
+      {input}
     </div>
   );
 }

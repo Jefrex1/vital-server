@@ -18,6 +18,9 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
   const [allConfigs, setAllConfigs] = useState<SSHConfig[]>([]);
   const [newGroup, setNewGroup] = useState({ name: "", description: "" });
   const [showNewGroup, setShowNewGroup] = useState(false);
+  const [inviteModal, setInviteModal] = useState<{ groupId: number; groupName: string } | null>(null);
+  const [inviteTarget, setInviteTarget] = useState("");
+  const [inviteMsg, setInviteMsg] = useState("");
 
   const hdr = {
     "Content-Type": "application/json",
@@ -96,6 +99,24 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
     onRefresh();
   }
 
+  async function sendInvite() {
+    if (!inviteModal || !inviteTarget) return;
+    setInviteMsg("");
+    const isId = /^\d+$/.test(inviteTarget);
+    const body = isId ? { user_id: Number(inviteTarget) } : { username: inviteTarget };
+    const res = await fetch(`${API}/groups/${inviteModal.groupId}/invite`, {
+      method: "POST", headers: hdr, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setInviteMsg("✓ Запит надіслано!");
+      setInviteTarget("");
+      setTimeout(() => { setInviteModal(null); setInviteMsg(""); }, 1500);
+    } else {
+      setInviteMsg("✕ " + data.error);
+    }
+  }
+
   const tagStyle = (color: string, borderColor: string): React.CSSProperties => ({
     background: t.tagBg,
     border: `1px solid ${borderColor}`,
@@ -170,14 +191,22 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
                   </span>
                 )}
               </div>
-              <button
-                onClick={() => deleteGroup(g.id)}
-                style={{ background: "none", border: "none", color: t.textDim, cursor: "pointer", fontSize: 13 }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = t.red)}
-                onMouseLeave={(e) => (e.currentTarget.style.color = t.textDim)}
-              >
-                ✕
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => { setInviteModal({ groupId: g.id, groupName: g.name }); setInviteTarget(""); setInviteMsg(""); }}
+                  style={{ background: t.accentBg, border: `1px solid ${t.accentBorder}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: t.accent, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  + Запросити
+                </button>
+                <button
+                  onClick={() => deleteGroup(g.id)}
+                  style={{ background: "none", border: "none", color: t.textDim, cursor: "pointer", fontSize: 13 }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = t.red)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = t.textDim)}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             {/* Members section */}
@@ -316,6 +345,29 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
           >
             Create
           </button>
+        </Modal>
+      )}
+
+      {inviteModal && (
+        <Modal title={`Запросити в "${inviteModal.groupName}"`} onClose={() => { setInviteModal(null); setInviteMsg(""); setInviteTarget(""); }} t={t}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 11, color: t.textDim }}>Введіть ім'я або ID користувача</div>
+            <Input
+              label="Username або ID"
+              value={inviteTarget}
+              onChange={(v) => setInviteTarget(v)}
+              t={t}
+            />
+            {inviteMsg && (
+              <div style={{ fontSize: 12, color: inviteMsg.startsWith("✓") ? t.green : t.red }}>{inviteMsg}</div>
+            )}
+            <button
+              onClick={sendInvite}
+              style={{ background: t.accentBg, border: `1px solid ${t.accentBorder}`, borderRadius: 4, padding: "9px", fontSize: 13, color: t.accent, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              Надіслати запит
+            </button>
+          </div>
         </Modal>
       )}
     </div>

@@ -62,7 +62,28 @@ export interface GroupRow {
   id: number;
   name: string;
   description: string | null;
+  owner_id: number | null;
   members: { id: number; username: string; role: string }[];
+  configs: { id: number; label: string; host: string; port: number; username: string; auth_type: string }[];
+}
+
+export interface GroupInvite {
+  id: number;
+  group_id: number;
+  from_user_id: number;
+  from_username: string;
+  group_name: string;
+  group_description: string | null;
+  created_at: number;
+  status: "pending" | "accepted" | "declined";
+}
+
+export interface UserSettings {
+  user_id: number;
+  display_name: string | null;
+  email: string | null;
+  bio: string | null;
+  theme: string;
 }
 
 export interface PermRow {
