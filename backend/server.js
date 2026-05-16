@@ -15,6 +15,9 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'oserver.db');
 const JWT_SECRET = process.env.JWT_SECRET || 'oserver-secret-change-me-in-production';
 const BCRYPT_ROUNDS = 10;
 
+// Allow public registration? Set ALLOW_REGISTER=false to disable after initial setup
+const ALLOW_PUBLIC_REGISTER = process.env.ALLOW_REGISTER !== 'false';
+
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -44,21 +47,27 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS ssh_configs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    owner_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,  -- NULL = shared
-    group_id    INTEGER REFERENCES groups(id) ON DELETE SET NULL, -- group-shared
+    owner_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    group_id    INTEGER REFERENCES groups(id) ON DELETE SET NULL,
     label       TEXT    NOT NULL,
     host        TEXT    NOT NULL,
     port        INTEGER NOT NULL DEFAULT 22,
     username    TEXT    NOT NULL,
-    password    TEXT,                           -- encrypted or null if key-based
-    ssh_key     TEXT,                           -- private key PEM
-    auth_type   TEXT    NOT NULL DEFAULT 'password', -- 'password' | 'key'
+    password    TEXT,
+    ssh_key     TEXT,
+    auth_type   TEXT    NOT NULL DEFAULT 'password',
     created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE IF NOT EXISTS group_configs (
+    group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    config_id   INTEGER NOT NULL REFERENCES ssh_configs(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, config_id)
   );
 
   CREATE TABLE IF NOT EXISTS permissions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    target_type TEXT    NOT NULL, -- 'user' | 'group'
+    target_type TEXT    NOT NULL,
     target_id   INTEGER NOT NULL,
     config_id   INTEGER REFERENCES ssh_configs(id) ON DELETE CASCADE,
     can_read    INTEGER NOT NULL DEFAULT 1,
@@ -108,7 +117,7 @@ function authMiddleware(req, res, next) {
   const token = header.slice(7);
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { id, username, role }
+    req.user = decoded;
     next();
   } catch {
     res.status(401).json({ error: 'Invalid token' });
@@ -122,18 +131,15 @@ function adminMiddleware(req, res, next) {
 
 // Check effective permissions for a user on a config
 function getEffectivePerms(userId, configId) {
-  // Admin gets everything
   const user = db.prepare('SELECT role FROM users WHERE id = ?').get(userId);
   if (user?.role === 'admin') {
     return { can_read: 1, can_write: 1, can_delete: 1, can_terminal: 1, can_upload: 1 };
   }
 
-  // Direct user permission
   const userPerm = db.prepare(
     "SELECT * FROM permissions WHERE target_type='user' AND target_id=? AND (config_id=? OR config_id IS NULL)"
   ).get(userId, configId);
 
-  // Group permissions
   const groupPerms = db.prepare(`
     SELECT p.* FROM permissions p
     JOIN group_members gm ON gm.group_id = p.target_id
@@ -143,7 +149,6 @@ function getEffectivePerms(userId, configId) {
   const allPerms = [...(userPerm ? [userPerm] : []), ...groupPerms];
   if (allPerms.length === 0) return null;
 
-  // Merge: OR across all matching permissions
   return {
     can_read:     allPerms.some(p => p.can_read)     ? 1 : 0,
     can_write:    allPerms.some(p => p.can_write)    ? 1 : 0,
@@ -202,7 +207,6 @@ function sftpStat(sftp, path) {
   });
 }
 
-// Normalize config from DB or request body for sshConnect
 function normalizeConfig(src) {
   return {
     host:      src.host,
@@ -246,6 +250,31 @@ app.post('/auth/login', (req, res) => {
   res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
 });
 
+// Public registration (can be disabled via ALLOW_REGISTER=false env var)
+app.post('/auth/register/public', async (req, res) => {
+  if (!ALLOW_PUBLIC_REGISTER) {
+    return res.status(403).json({ error: 'Public registration is disabled' });
+  }
+
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
+  if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 characters' });
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+  try {
+    const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const result = db.prepare('INSERT INTO users (username, password, role) VALUES (?,?,?)').run(username, hashed, 'user');
+    auditLog(result.lastInsertRowid, username, 'register', null, 'public registration', getClientIp(req));
+
+    const token = jwt.sign({ id: result.lastInsertRowid, username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: result.lastInsertRowid, username, role: 'user' } });
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin-only: create user with role
 app.post('/auth/register', authMiddleware, adminMiddleware, async (req, res) => {
   const { username, password, role } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
@@ -308,6 +337,10 @@ app.get('/groups', authMiddleware, (req, res) => {
       SELECT u.id, u.username, u.role FROM group_members gm
       JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ?
     `).all(g.id),
+    configs: db.prepare(`
+      SELECT sc.id, sc.label, sc.host, sc.port, sc.username, sc.auth_type FROM group_configs gc
+      JOIN ssh_configs sc ON sc.id = gc.config_id WHERE gc.group_id = ?
+    `).all(g.id),
   }));
   res.json(result);
 });
@@ -346,6 +379,34 @@ app.delete('/groups/:id/members/:uid', authMiddleware, adminMiddleware, (req, re
   res.json({ ok: true });
 });
 
+// ─── Group configs (servers assigned to group) ────────────────────────────────
+app.post('/groups/:id/configs', authMiddleware, adminMiddleware, (req, res) => {
+  const { config_id } = req.body;
+  if (!config_id) return res.status(400).json({ error: 'config_id required' });
+  try {
+    db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(req.params.id, config_id);
+
+    // Also auto-create a read permission for this group on this config if not exists
+    const exists = db.prepare(
+      "SELECT id FROM permissions WHERE target_type='group' AND target_id=? AND config_id=?"
+    ).get(req.params.id, config_id);
+    if (!exists) {
+      db.prepare(
+        'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload) VALUES (?,?,?,1,0,0,1,0)'
+      ).run('group', req.params.id, config_id);
+    }
+
+    auditLog(req.user.id, req.user.username, 'group_add_config', req.params.id, `config_id=${config_id}`, getClientIp(req));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/groups/:id/configs/:cid', authMiddleware, adminMiddleware, (req, res) => {
+  db.prepare('DELETE FROM group_configs WHERE group_id = ? AND config_id = ?').run(req.params.id, req.params.cid);
+  auditLog(req.user.id, req.user.username, 'group_remove_config', req.params.id, `config_id=${req.params.cid}`, getClientIp(req));
+  res.json({ ok: true });
+});
+
 // ─── SSH Configs routes ───────────────────────────────────────────────────────
 app.get('/configs', authMiddleware, (req, res) => {
   const { id: userId, role } = req.user;
@@ -354,16 +415,18 @@ app.get('/configs', authMiddleware, (req, res) => {
   if (role === 'admin') {
     rows = db.prepare('SELECT * FROM ssh_configs ORDER BY id').all();
   } else {
-    // Own configs + group-shared configs user belongs to + global shared (owner_id IS NULL AND group_id IS NULL)
+    // Own configs + configs shared to user's groups via group_configs + global shared
     rows = db.prepare(`
       SELECT DISTINCT sc.* FROM ssh_configs sc
-      LEFT JOIN group_members gm ON gm.group_id = sc.group_id AND gm.user_id = ?
-      WHERE sc.owner_id = ? OR gm.user_id = ? OR (sc.owner_id IS NULL AND sc.group_id IS NULL)
+      LEFT JOIN group_configs gc ON gc.config_id = sc.id
+      LEFT JOIN group_members gm ON gm.group_id = gc.group_id AND gm.user_id = ?
+      WHERE sc.owner_id = ?
+        OR gm.user_id = ?
+        OR (sc.owner_id IS NULL AND sc.group_id IS NULL)
       ORDER BY sc.id
     `).all(userId, userId, userId);
   }
 
-  // Strip private key from response for security
   const result = rows.map(r => ({ ...r, ssh_key: r.ssh_key ? '[KEY SET]' : null, password: r.password ? '[PASSWORD SET]' : null }));
   res.json(result);
 });
@@ -424,20 +487,17 @@ app.get('/audit', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 // ─── Middleware to resolve SSH config from request ────────────────────────────
-// Accepts either { configId } (load from DB) or raw { host, username, password, port, ssh_key, auth_type }
 async function resolveConfig(req, res) {
   if (req.body.configId) {
     const cfg = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(req.body.configId);
     if (!cfg) { res.status(404).json({ error: 'Config not found' }); return null; }
 
-    // Check permission
     const perms = getEffectivePerms(req.user.id, cfg.id);
     if (!perms || !perms.can_read) { res.status(403).json({ error: 'No access to this config' }); return null; }
 
     return { cfg: normalizeConfig(cfg), perms, configId: cfg.id, configLabel: cfg.label };
   }
 
-  // Raw credentials (admin or direct use)
   if (req.user.role !== 'admin' && !req.body.host) {
     res.status(400).json({ error: 'configId or host required' }); return null;
   }
@@ -461,7 +521,6 @@ wss.on('connection', (ws, req) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // Auth via token on first message
     if (msg.type === 'auth') {
       try {
         wsUser = jwt.verify(msg.token, JWT_SECRET);
@@ -470,7 +529,6 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    // Resolve SSH config
     async function resolveWsConfig() {
       if (msg.configId) {
         const cfgRow = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(msg.configId);
@@ -729,7 +787,6 @@ app.post('/files/mkdir', authMiddleware, async (req, res) => {
 
 async function handleDownload(req, res) {
   const src = req.method === 'GET' ? req.query : req.body;
-  // Auth check for GET (token in query)
   if (req.method === 'GET' && src.token) {
     try { req.user = jwt.verify(src.token, JWT_SECRET); } catch { return res.status(401).json({ error: 'Unauthorized' }); }
   }

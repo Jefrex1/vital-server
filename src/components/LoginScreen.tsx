@@ -6,9 +6,10 @@ import { API } from "@/constants/themes";
 
 interface LoginScreenProps {
   onLogin: (user: AuthUser, token: string) => void;
+  onRegister: () => void;
 }
 
-export function LoginScreen({ onLogin }: LoginScreenProps) {
+export function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
   const [creds, setCreds] = useState({ username: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -132,8 +133,33 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           {loading ? "Signing in…" : "Sign in →"}
         </button>
 
-        <div style={{ fontSize: 11, color: "#555", textAlign: "center" }}>
-          default: admin / admin
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ fontSize: 11, color: "#555" }}>
+            default: admin / admin
+          </span>
+          <button
+            onClick={onRegister}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#555",
+              fontFamily: "inherit",
+              fontSize: 11,
+              cursor: "pointer",
+              padding: 0,
+              textDecoration: "underline",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#888")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#555")}
+          >
+            Register →
+          </button>
         </div>
       </div>
     </div>

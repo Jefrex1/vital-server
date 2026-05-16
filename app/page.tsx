@@ -4,9 +4,12 @@ import { useState, useEffect } from "react";
 import type { AuthUser, SSHConfig, Theme } from "@/types";
 import { THEMES } from "@/constants/themes";
 import { LoginScreen } from "@/components/LoginScreen";
+import { RegisterScreen } from "@/components/RegisterScreen";
 import { ConfigPicker } from "@/components/ConfigPicker";
 import { AdminPanel } from "@/components/AdminPanel";
 import { FileManager } from "@/components/FileManager";
+
+type Screen = "login" | "register";
 
 export default function Page() {
   const [theme, setTheme] = useState<Theme>("dark");
@@ -15,6 +18,7 @@ export default function Page() {
   const [config, setConfig] = useState<SSHConfig | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [screen, setScreen] = useState<Screen>("login");
 
   const t = THEMES[theme];
 
@@ -30,16 +34,15 @@ export default function Page() {
         setToken(savedToken);
       }
       if (savedCfg) setConfig(JSON.parse(savedCfg));
-      if (savedTheme === "light" || savedTheme === "dark")
-        setTheme(savedTheme);
+      if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
     } catch {}
-
     setSessionLoaded(true);
   }, []);
 
   function handleLogin(user: AuthUser, tok: string) {
     setAuthUser(user);
     setToken(tok);
+    setScreen("login");
     try {
       sessionStorage.setItem("oserver_user", JSON.stringify(user));
       sessionStorage.setItem("oserver_token", tok);
@@ -50,36 +53,45 @@ export default function Page() {
     setAuthUser(null);
     setToken("");
     setConfig(null);
-    try {
-      sessionStorage.clear();
-    } catch {}
+    setScreen("login");
+    try { sessionStorage.clear(); } catch {}
   }
 
   function handleConnect(cfg: SSHConfig) {
     setConfig(cfg);
-    try {
-      sessionStorage.setItem("oserver_config", JSON.stringify(cfg));
-    } catch {}
+    try { sessionStorage.setItem("oserver_config", JSON.stringify(cfg)); } catch {}
   }
 
   function handleDisconnect() {
     setConfig(null);
-    try {
-      sessionStorage.removeItem("oserver_config");
-    } catch {}
+    try { sessionStorage.removeItem("oserver_config"); } catch {}
   }
 
   function handleThemeChange(newTheme: Theme) {
     setTheme(newTheme);
-    try {
-      sessionStorage.setItem("oserver_theme", newTheme);
-    } catch {}
+    try { sessionStorage.setItem("oserver_theme", newTheme); } catch {}
   }
 
   if (!sessionLoaded) return null;
-  if (!authUser)
-    return <LoginScreen onLogin={handleLogin} />;
-  if (!config)
+
+  if (!authUser) {
+    if (screen === "register") {
+      return (
+        <RegisterScreen
+          onRegister={handleLogin}
+          onBackToLogin={() => setScreen("login")}
+        />
+      );
+    }
+    return (
+      <LoginScreen
+        onLogin={handleLogin}
+        onRegister={() => setScreen("register")}
+      />
+    );
+  }
+
+  if (!config) {
     return (
       <ConfigPicker
         token={token}
@@ -87,7 +99,9 @@ export default function Page() {
         t={t}
       />
     );
-  if (showAdmin)
+  }
+
+  if (showAdmin) {
     return (
       <AdminPanel
         token={token}
@@ -95,6 +109,7 @@ export default function Page() {
         onClose={() => setShowAdmin(false)}
       />
     );
+  }
 
   return (
     <FileManager

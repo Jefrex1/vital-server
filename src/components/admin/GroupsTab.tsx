@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { GroupRow, UserRow } from "@/types";
+import { GroupRow, UserRow, SSHConfig } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { Modal } from "../ui/Modal";
 import { Input } from "../ui/Input";
@@ -12,17 +12,11 @@ interface GroupsTabProps {
   onRefresh: () => void;
 }
 
-export function GroupsTab({
-  token,
-  t,
-  onRefresh,
-}: GroupsTabProps) {
+export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [newGroup, setNewGroup] = useState({
-    name: "",
-    description: "",
-  });
+  const [allConfigs, setAllConfigs] = useState<SSHConfig[]>([]);
+  const [newGroup, setNewGroup] = useState({ name: "", description: "" });
   const [showNewGroup, setShowNewGroup] = useState(false);
 
   const hdr = {
@@ -30,18 +24,18 @@ export function GroupsTab({
     Authorization: `Bearer ${token}`,
   };
 
-  useEffect(() => {
-    async function load() {
-      const res = await fetch(`${API}/groups`, { headers: hdr });
-      if (res.ok) setGroups(await res.json());
+  async function load() {
+    const [gRes, uRes, cRes] = await Promise.all([
+      fetch(`${API}/groups`, { headers: hdr }),
+      fetch(`${API}/users`, { headers: hdr }),
+      fetch(`${API}/configs`, { headers: hdr }),
+    ]);
+    if (gRes.ok) setGroups(await gRes.json());
+    if (uRes.ok) setUsers(await uRes.json());
+    if (cRes.ok) setAllConfigs(await cRes.json());
+  }
 
-      const userRes = await fetch(`${API}/users`, {
-        headers: hdr,
-      });
-      if (userRes.ok) setUsers(await userRes.json());
-    }
-    load();
-  }, [token]);
+  useEffect(() => { load(); }, [token]);
 
   async function createGroup() {
     const res = await fetch(`${API}/groups`, {
@@ -52,16 +46,15 @@ export function GroupsTab({
     if (res.ok) {
       setShowNewGroup(false);
       setNewGroup({ name: "", description: "" });
+      load();
       onRefresh();
     }
   }
 
   async function deleteGroup(id: number) {
     if (!confirm("Delete group?")) return;
-    await fetch(`${API}/groups/${id}`, {
-      method: "DELETE",
-      headers: hdr,
-    });
+    await fetch(`${API}/groups/${id}`, { method: "DELETE", headers: hdr });
+    load();
     onRefresh();
   }
 
@@ -71,29 +64,61 @@ export function GroupsTab({
       headers: hdr,
       body: JSON.stringify({ user_id: userId }),
     });
+    load();
     onRefresh();
   }
 
-  async function removeMember(
-    groupId: number,
-    userId: number
-  ) {
-    await fetch(
-      `${API}/groups/${groupId}/members/${userId}`,
-      { method: "DELETE", headers: hdr }
-    );
+  async function removeMember(groupId: number, userId: number) {
+    await fetch(`${API}/groups/${groupId}/members/${userId}`, {
+      method: "DELETE",
+      headers: hdr,
+    });
+    load();
     onRefresh();
   }
+
+  async function addConfig(groupId: number, configId: number) {
+    await fetch(`${API}/groups/${groupId}/configs`, {
+      method: "POST",
+      headers: hdr,
+      body: JSON.stringify({ config_id: configId }),
+    });
+    load();
+    onRefresh();
+  }
+
+  async function removeConfig(groupId: number, configId: number) {
+    await fetch(`${API}/groups/${groupId}/configs/${configId}`, {
+      method: "DELETE",
+      headers: hdr,
+    });
+    load();
+    onRefresh();
+  }
+
+  const tagStyle = (color: string, borderColor: string): React.CSSProperties => ({
+    background: t.tagBg,
+    border: `1px solid ${borderColor}`,
+    color: color,
+    borderRadius: 4,
+    padding: "3px 8px",
+    fontSize: 11,
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+  });
+
+  const sectionLabel: React.CSSProperties = {
+    fontSize: 10,
+    color: t.textDim,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    marginBottom: 6,
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 14, color: t.text }}>Groups</span>
         <button
           onClick={() => setShowNewGroup(true)}
@@ -112,163 +137,168 @@ export function GroupsTab({
         </button>
       </div>
 
-      {groups.map((g) => (
-        <div
-          key={g.id}
-          style={{
-            background: t.tableBg,
-            border: `1px solid ${t.border}`,
-            borderRadius: 6,
-            padding: "14px 16px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 10,
-            }}
-          >
-            <div>
-              <span style={{ fontSize: 13, color: t.text }}>
-                {g.name}
-              </span>
-              {g.description && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: t.textDim,
-                    marginLeft: 10,
-                  }}
-                >
-                  {g.description}
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => deleteGroup(g.id)}
-              style={{
-                background: "none",
-                border: "none",
-                color: t.textDim,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.color = t.red)
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.color = t.textDim)
-              }
-            >
-              ✕
-            </button>
-          </div>
+      {groups.length === 0 && (
+        <div style={{ fontSize: 12, color: t.textDim, padding: "10px 0" }}>
+          No groups yet. Create one above.
+        </div>
+      )}
 
+      {groups.map((g) => {
+        const groupConfigIds = new Set((g as any).configs?.map((c: any) => c.id) ?? []);
+        const availableConfigs = allConfigs.filter((c) => !groupConfigIds.has(c.id));
+
+        return (
           <div
+            key={g.id}
             style={{
+              background: t.tableBg,
+              border: `1px solid ${t.border}`,
+              borderRadius: 6,
+              padding: "14px 16px",
               display: "flex",
-              flexWrap: "wrap",
-              gap: 6,
-              marginBottom: 10,
+              flexDirection: "column",
+              gap: 14,
             }}
           >
-            {g.members.map((m) => (
-              <span
-                key={m.id}
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <span style={{ fontSize: 13, color: t.text }}>{g.name}</span>
+                {g.description && (
+                  <span style={{ fontSize: 11, color: t.textDim, marginLeft: 10 }}>
+                    {g.description}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => deleteGroup(g.id)}
+                style={{ background: "none", border: "none", color: t.textDim, cursor: "pointer", fontSize: 13 }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = t.red)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = t.textDim)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Members section */}
+            <div>
+              <div style={sectionLabel}>Members</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {g.members.length === 0 && (
+                  <span style={{ fontSize: 11, color: t.textDim }}>No members</span>
+                )}
+                {g.members.map((m) => (
+                  <span key={m.id} style={tagStyle(t.tagColor, t.tagBorder)}>
+                    {m.username}
+                    {m.role === "admin" && (
+                      <span style={{ fontSize: 9, color: t.yellow, marginLeft: 2 }}>admin</span>
+                    )}
+                    <span
+                      onClick={() => removeMember(g.id, m.id)}
+                      style={{ cursor: "pointer", opacity: 0.6, lineHeight: 1 }}
+                    >
+                      ✕
+                    </span>
+                  </span>
+                ))}
+              </div>
+              <select
+                onChange={(e) => {
+                  if (e.target.value) {
+                    addMember(g.id, Number(e.target.value));
+                    e.target.value = "";
+                  }
+                }}
                 style={{
-                  background: t.tagBg,
-                  border: `1px solid ${t.tagBorder}`,
-                  color: t.tagColor,
+                  background: t.inputBg,
+                  border: `1px solid ${t.border2}`,
                   borderRadius: 4,
-                  padding: "3px 8px",
-                  fontSize: 11,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 5,
+                  padding: "5px 10px",
+                  color: t.text,
+                  fontFamily: "inherit",
+                  fontSize: 12,
+                  outline: "none",
                 }}
               >
-                {m.username}
-                <span
-                  onClick={() =>
-                    removeMember(g.id, m.id)
-                  }
-                  style={{
-                    cursor: "pointer",
-                    opacity: 0.6,
-                    lineHeight: 1,
-                  }}
-                >
-                  ✕
-                </span>
-              </span>
-            ))}
-          </div>
+                <option value="">+ Add member…</option>
+                {users
+                  .filter((u) => !g.members.some((m) => m.id === u.id))
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.username} ({u.role})
+                    </option>
+                  ))}
+              </select>
+            </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-            }}
-          >
-            <select
-              onChange={(e) => {
-                if (e.target.value) {
-                  addMember(g.id, Number(e.target.value));
-                  e.target.value = "";
-                }
-              }}
-              style={{
-                background: t.inputBg,
-                border: `1px solid ${t.border2}`,
-                borderRadius: 4,
-                padding: "5px 10px",
-                color: t.text,
-                fontFamily: "inherit",
-                fontSize: 12,
-                outline: "none",
-              }}
-            >
-              <option value="">+ Add member…</option>
-              {users
-                .filter((u) =>
-                  !g.members.some((m) => m.id === u.id)
-                )
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.username}
+            {/* Servers section */}
+            <div>
+              <div style={sectionLabel}>Servers (accessible to group members)</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {((g as any).configs ?? []).length === 0 && (
+                  <span style={{ fontSize: 11, color: t.textDim }}>No servers assigned</span>
+                )}
+                {((g as any).configs ?? []).map((c: any) => (
+                  <span key={c.id} style={tagStyle(t.green, t.green + "44")}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" />
+                      <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+                    </svg>
+                    {c.label || c.host}
+                    <span style={{ fontSize: 9, color: t.textDim }}>
+                      {c.username}@{c.host}:{c.port}
+                    </span>
+                    <span
+                      onClick={() => removeConfig(g.id, c.id)}
+                      style={{ cursor: "pointer", opacity: 0.6, lineHeight: 1 }}
+                    >
+                      ✕
+                    </span>
+                  </span>
+                ))}
+              </div>
+              <select
+                onChange={(e) => {
+                  if (e.target.value) {
+                    addConfig(g.id, Number(e.target.value));
+                    e.target.value = "";
+                  }
+                }}
+                style={{
+                  background: t.inputBg,
+                  border: `1px solid ${t.border2}`,
+                  borderRadius: 4,
+                  padding: "5px 10px",
+                  color: t.text,
+                  fontFamily: "inherit",
+                  fontSize: 12,
+                  outline: "none",
+                }}
+              >
+                <option value="">+ Add server…</option>
+                {availableConfigs.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label || c.host} — {c.username}@{c.host}:{c.port}
                   </option>
                 ))}
-            </select>
+              </select>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {showNewGroup && (
-        <Modal
-          title="Create group"
-          onClose={() => setShowNewGroup(false)}
-          t={t}
-        >
+        <Modal title="Create group" onClose={() => setShowNewGroup(false)} t={t}>
           <Input
             label="Name"
             value={newGroup.name}
-            onChange={(v) =>
-              setNewGroup((g) => ({ ...g, name: v }))
-            }
+            onChange={(v) => setNewGroup((g) => ({ ...g, name: v }))}
             t={t}
           />
           <Input
             label="Description (optional)"
             value={newGroup.description}
-            onChange={(v) =>
-              setNewGroup((g) => ({
-                ...g,
-                description: v,
-              }))
-            }
+            onChange={(v) => setNewGroup((g) => ({ ...g, description: v }))}
             t={t}
           />
           <button
