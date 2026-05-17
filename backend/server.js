@@ -457,12 +457,11 @@ app.delete('/groups/:id', authMiddleware, (req, res) => {
 });
 
 // ─── Group provisioning ───────────────────────────────────────────────────────
-// Owner or admin: creates Linux user + directory + SSH key for the group
+// Створює vt_group_* юзера і дає йому доступ до вказаної папки власника
 app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
   const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!group) return res.status(404).json({ error: 'Group not found' });
 
-  // Allow group owner OR admin
   if (req.user.role !== 'admin' && group.owner_id !== req.user.id)
     return res.status(403).json({ error: 'Only group owner or admin can provision' });
 
@@ -475,7 +474,6 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
   const cfgRow = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(configId);
   if (!cfgRow) return res.status(404).json({ error: 'SSH config not found' });
 
-  // Owner can only provision using a config they own or that belongs to their group
   if (req.user.role !== 'admin') {
     const hasAccess = cfgRow.owner_id === req.user.id || (cfgRow.group_id && db.prepare(
       'SELECT 1 FROM group_members WHERE group_id=? AND user_id=?'
@@ -485,95 +483,80 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
 
   const linuxUser = `vt_group_${group.id}`;
   const sudoPassword = req.body.sudo_password || null;
-  // Helper: prefix command with sudo, optionally passing password via stdin
   const sudo = (cmd) => sudoPassword
     ? `echo ${JSON.stringify(sudoPassword)} | sudo -S sh -c ${JSON.stringify(cmd)} 2>/dev/null`
-    : `sudo ${cmd}`;
+    : `sudo sh -c ${JSON.stringify(cmd)}`;
 
   let conn;
   try {
-    const normalized = normalizeConfig(cfgRow);
-    conn = await sshConnect(normalized);
+    conn = await sshConnect(normalizeConfig(cfgRow));
 
-    // 1. Create Linux group and user
-    await sshExec(conn, sudo(`sh -c "getent group ${linuxUser} || groupadd ${linuxUser}"`));
-    await sshExec(conn, sudo(`sh -c "id ${linuxUser} 2>/dev/null || useradd -m -s /bin/bash -g ${linuxUser} ${linuxUser}"`));
+    // 1. Створити Linux-групу і юзера vt_group_* якщо не існують
+    await sshExec(conn, sudo(`getent group ${linuxUser} || groupadd ${linuxUser}`));
+    await sshExec(conn, sudo(`id ${linuxUser} 2>/dev/null || useradd -m -s /bin/bash -g ${linuxUser} ${linuxUser}`));
 
-    // 1b. Add all current group members to the Linux group so they can access the folder
-    const groupMembers = db.prepare('SELECT u.username FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ?').all(group.id);
-    for (const member of groupMembers) {
-      await sshExec(conn, sudo(`sh -c "id '${member.username}' 2>/dev/null && usermod -aG ${linuxUser} '${member.username}' || true"`));
+    // 2. Переконатись що папка існує
+    await sshExec(conn, sudo(`mkdir -p '${rootPath}'`));
+
+    // 3. Виправити права: змінити групу папки на vt_group_*, setgid щоб нові файли теж мали цю групу
+    //    chown НЕ чіпаємо — власник залишається як є (наприклад jefrex)
+    await sshExec(conn, sudo(`chgrp ${linuxUser} '${rootPath}'`));
+    await sshExec(conn, sudo(`chmod 2770 '${rootPath}'`));
+    // Дозволяємо зайти в батьківську директорію (тільки x, без r — чужі файли не видно)
+    const parentPath = rootPath.split('/').slice(0, -1).join('/') || '/';
+    if (parentPath !== '/') {
+      await sshExec(conn, sudo(`chmod o+x '${parentPath}' 2>/dev/null || true`));
     }
 
-    // 2. Create root directory and set permissions
-    await sshExec(conn, sudo(`sh -c "mkdir -p '${rootPath}' && chown ${linuxUser}:${linuxUser} '${rootPath}' && chmod 2770 '${rootPath}'"`) );
-
-    // 3. Generate SSH key pair as vt_group_* user
+    // 4. Згенерувати SSH-ключ для vt_group_* якщо ще немає
     await sshExec(conn, sudo(
-      `sh -c "` +
       `mkdir -p /home/${linuxUser}/.ssh && ` +
       `chmod 700 /home/${linuxUser}/.ssh && ` +
       `([ -f /home/${linuxUser}/.ssh/vt_key ] || ssh-keygen -t ed25519 -C 'vt_group_${group.id}' -f /home/${linuxUser}/.ssh/vt_key -N '') && ` +
-      `grep -qF \"$(cat /home/${linuxUser}/.ssh/vt_key.pub)\" /home/${linuxUser}/.ssh/authorized_keys 2>/dev/null || cat /home/${linuxUser}/.ssh/vt_key.pub >> /home/${linuxUser}/.ssh/authorized_keys && ` +
+      `grep -qF "$(cat /home/${linuxUser}/.ssh/vt_key.pub)" /home/${linuxUser}/.ssh/authorized_keys 2>/dev/null || cat /home/${linuxUser}/.ssh/vt_key.pub >> /home/${linuxUser}/.ssh/authorized_keys && ` +
       `chmod 700 /home/${linuxUser}/.ssh && ` +
       `chmod 600 /home/${linuxUser}/.ssh/authorized_keys /home/${linuxUser}/.ssh/vt_key && ` +
-      `chown -R ${linuxUser}:${linuxUser} /home/${linuxUser}/.ssh` +
-      `"`
+      `chown -R ${linuxUser}:${linuxUser} /home/${linuxUser}/.ssh`
     ));
 
-    // Read keys via sudo since files are owned by vt_group_*
     const { stdout: privKey, stderr: privErr } = await sshExec(conn, sudo(`cat /home/${linuxUser}/.ssh/vt_key`));
-    const { stdout: pubKey,  stderr: pubErr  } = await sshExec(conn, sudo(`cat /home/${linuxUser}/.ssh/vt_key.pub`));
+    const { stdout: pubKey }                   = await sshExec(conn, sudo(`cat /home/${linuxUser}/.ssh/vt_key.pub`));
 
-    console.log('[provision] privKey length:', privKey.trim().length, 'privErr:', privErr);
-    console.log('[provision] pubKey length:', pubKey.trim().length,  'pubErr:', pubErr);
+    if (!privKey.trim()) throw new Error(`Failed to read private key: ${privErr}`);
+    if (!pubKey.trim())  throw new Error('Failed to read public key');
 
-    if (!privKey.trim()) throw new Error(`Failed to read private key — sudo stderr: ${privErr}`);
-    if (!pubKey.trim())  throw new Error(`Failed to read public key — sudo stderr: ${pubErr}`);
-
-    // 5. Save everything to DB
-    const updateResult = db.prepare(`
+    // 5. Зберегти в БД
+    db.prepare(`
       UPDATE groups SET
         provision_config_id = ?,
         provision_root_path = ?,
-        linux_user = ?,
-        linux_pubkey = ?,
-        linux_privkey = ?,
-        provisioned_at = unixepoch()
+        linux_user          = ?,
+        linux_pubkey        = ?,
+        linux_privkey       = ?,
+        provisioned_at      = unixepoch()
       WHERE id = ?
     `).run(configId, rootPath, linuxUser, pubKey.trim(), privKey.trim(), group.id);
-    console.log('[provision] groups UPDATE changes:', updateResult.changes);
 
-    // 6. Create or UPDATE a group SSH config — connects as vt_group_* with generated key
-    const existingGroupCfg = db.prepare(
-      "SELECT id FROM ssh_configs WHERE group_id = ?"
-    ).get(group.id);
-    console.log('[provision] existingGroupCfg:', existingGroupCfg);
-
+    // 6. Створити або оновити груповий SSH-конфіг (підключається як vt_group_*)
+    const existingGroupCfg = db.prepare('SELECT id FROM ssh_configs WHERE group_id = ?').get(group.id);
     let groupCfgId;
     if (!existingGroupCfg) {
-      console.log('[provision] Creating new ssh_config for group');
-      const cfgResult = db.prepare(
+      const r = db.prepare(
         'INSERT INTO ssh_configs (owner_id, group_id, label, host, port, username, ssh_key, auth_type) VALUES (?,?,?,?,?,?,?,?)'
       ).run(null, group.id, `[Group] ${group.name}`, cfgRow.host, cfgRow.port, linuxUser, privKey.trim(), 'key');
-      groupCfgId = cfgResult.lastInsertRowid;
-      console.log('[provision] New ssh_config id:', groupCfgId);
-
+      groupCfgId = r.lastInsertRowid;
       db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(group.id, groupCfgId);
-
       db.prepare(
         'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload, root_path) VALUES (?,?,?,1,1,1,1,1,?)'
       ).run('group', group.id, groupCfgId, rootPath);
     } else {
       groupCfgId = existingGroupCfg.id;
-      console.log('[provision] Updating existing ssh_config id:', groupCfgId);
       db.prepare(
-        "UPDATE ssh_configs SET ssh_key = ?, host = ?, port = ?, username = ?, auth_type = 'key' WHERE id = ?"
+        `UPDATE ssh_configs SET ssh_key=?, host=?, port=?, username=?, auth_type='key' WHERE id=?`
       ).run(privKey.trim(), cfgRow.host, cfgRow.port, linuxUser, groupCfgId);
-      // Ensure group_configs link exists (may have been deleted)
       db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(group.id, groupCfgId);
       db.prepare(
-        "UPDATE permissions SET root_path = ? WHERE target_type='group' AND target_id = ? AND config_id = ?"
+        `UPDATE permissions SET root_path=? WHERE target_type='group' AND target_id=? AND config_id=?`
       ).run(rootPath, group.id, groupCfgId);
     }
 
