@@ -140,7 +140,6 @@ try {
   const groupCols = db.prepare('PRAGMA table_info(groups)').all().map(c => c.name);
   if (!groupCols.includes('owner_id')) {
     db.exec("ALTER TABLE groups ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL");
-    // Restore owner_id from group_members where group_role = 'owner'
     const owners = db.prepare("SELECT group_id, user_id FROM group_members WHERE group_role='owner'").all();
     for (const o of owners) {
       db.prepare('UPDATE groups SET owner_id=? WHERE id=?').run(o.user_id, o.group_id);
@@ -148,6 +147,29 @@ try {
     console.log('[oServer] Migrated: restored owner_id in groups');
   }
 } catch(e) { console.error('[oServer] Migration error (owner_id):', e.message); }
+
+// Migration: add provisioning columns to groups if missing
+try {
+  const gCols = db.prepare('PRAGMA table_info(groups)').all().map(c => c.name);
+  if (!gCols.includes('provision_config_id')) {
+    db.exec('ALTER TABLE groups ADD COLUMN provision_config_id INTEGER REFERENCES ssh_configs(id) ON DELETE SET NULL');
+    db.exec('ALTER TABLE groups ADD COLUMN provision_root_path TEXT');
+    db.exec('ALTER TABLE groups ADD COLUMN linux_user TEXT');
+    db.exec('ALTER TABLE groups ADD COLUMN linux_pubkey TEXT');
+    db.exec('ALTER TABLE groups ADD COLUMN linux_privkey TEXT');
+    db.exec('ALTER TABLE groups ADD COLUMN provisioned_at INTEGER');
+    console.log('[oServer] Migrated: added provisioning columns to groups');
+  }
+} catch(e) { console.error('[oServer] Migration error (group provisioning):', e.message); }
+
+// Migration: add root_path to permissions if missing
+try {
+  const pCols = db.prepare('PRAGMA table_info(permissions)').all().map(c => c.name);
+  if (!pCols.includes('root_path')) {
+    db.exec('ALTER TABLE permissions ADD COLUMN root_path TEXT');
+    console.log('[oServer] Migrated: added root_path to permissions');
+  }
+} catch(e) { console.error('[oServer] Migration error (root_path):', e.message); }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function auditLog(userId, username, action, target, detail, ip) {
@@ -214,7 +236,18 @@ function sshConnect(config) {
   return new Promise((resolve, reject) => {
     const conn = new Client();
     conn.on('ready', () => resolve(conn));
-    conn.on('error', reject);
+    conn.on('error', (err) => {
+      console.error('[sshConnect] error:', {
+        host: config.host,
+        username: config.username,
+        auth_type: config.auth_type,
+        has_password: !!config.password,
+        has_key: !!config.ssh_key,
+        key_length: config.ssh_key?.length,
+        error: err.message,
+      });
+      reject(err);
+    });
 
     const connectOpts = {
       host: config.host || '127.0.0.1',
@@ -397,10 +430,12 @@ app.get('/groups', authMiddleware, (req, res) => {
 });
 
 app.post('/groups', authMiddleware, (req, res) => {
-  const { name, description } = req.body;
+  const { name, description, provision_config_id, provision_root_path } = req.body;
   if (!name) return res.status(400).json({ error: 'Name required' });
   try {
-    const result = db.prepare('INSERT INTO groups (name, description, owner_id) VALUES (?,?,?)').run(name, description || null, req.user.id);
+    const result = db.prepare(
+      'INSERT INTO groups (name, description, owner_id, provision_config_id, provision_root_path) VALUES (?,?,?,?,?)'
+    ).run(name, description || null, req.user.id, provision_config_id || null, provision_root_path || null);
     // Auto-add creator as member with owner role
     db.prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, group_role) VALUES (?,?,'owner')").run(result.lastInsertRowid, req.user.id);
     auditLog(req.user.id, req.user.username, 'create_group', name, null, getClientIp(req));
@@ -419,6 +454,131 @@ app.delete('/groups/:id', authMiddleware, (req, res) => {
   db.prepare('DELETE FROM groups WHERE id = ?').run(req.params.id);
   auditLog(req.user.id, req.user.username, 'delete_group', g.name, null, getClientIp(req));
   res.json({ ok: true });
+});
+
+// ─── Group provisioning ───────────────────────────────────────────────────────
+// Owner or admin: creates Linux user + directory + SSH key for the group
+app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
+  const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
+  if (!group) return res.status(404).json({ error: 'Group not found' });
+
+  // Allow group owner OR admin
+  if (req.user.role !== 'admin' && group.owner_id !== req.user.id)
+    return res.status(403).json({ error: 'Only group owner or admin can provision' });
+
+  const configId = req.body.provision_config_id || group.provision_config_id;
+  const rootPath = req.body.provision_root_path || group.provision_root_path;
+
+  if (!configId) return res.status(400).json({ error: 'provision_config_id required' });
+  if (!rootPath) return res.status(400).json({ error: 'provision_root_path required' });
+
+  const cfgRow = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(configId);
+  if (!cfgRow) return res.status(404).json({ error: 'SSH config not found' });
+
+  // Owner can only provision using a config they own or that belongs to their group
+  if (req.user.role !== 'admin') {
+    const hasAccess = cfgRow.owner_id === req.user.id || (cfgRow.group_id && db.prepare(
+      'SELECT 1 FROM group_members WHERE group_id=? AND user_id=?'
+    ).get(cfgRow.group_id, req.user.id));
+    if (!hasAccess) return res.status(403).json({ error: 'No access to this SSH config' });
+  }
+
+  const linuxUser = `vt_group_${group.id}`;
+  const sudoPassword = req.body.sudo_password || null;
+  // Helper: prefix command with sudo, optionally passing password via stdin
+  const sudo = (cmd) => sudoPassword
+    ? `echo ${JSON.stringify(sudoPassword)} | sudo -S sh -c ${JSON.stringify(cmd)} 2>/dev/null`
+    : `sudo ${cmd}`;
+
+  let conn;
+  try {
+    const normalized = normalizeConfig(cfgRow);
+    conn = await sshConnect(normalized);
+
+    // 1. Create Linux group and user
+    await sshExec(conn, sudo(`sh -c "getent group ${linuxUser} || groupadd ${linuxUser}"`));
+    await sshExec(conn, sudo(`sh -c "id ${linuxUser} 2>/dev/null || useradd -m -s /bin/bash -g ${linuxUser} ${linuxUser}"`));
+
+    // 2. Create root directory and set permissions
+    await sshExec(conn, sudo(`sh -c "mkdir -p '${rootPath}' && chown ${linuxUser}:${linuxUser} '${rootPath}' && chmod 2770 '${rootPath}'"`) );
+
+    // 3. Generate SSH key pair as vt_group_* user
+    await sshExec(conn, sudo(
+      `sh -c "` +
+      `mkdir -p /home/${linuxUser}/.ssh && ` +
+      `chmod 700 /home/${linuxUser}/.ssh && ` +
+      `([ -f /home/${linuxUser}/.ssh/vt_key ] || ssh-keygen -t ed25519 -C 'vt_group_${group.id}' -f /home/${linuxUser}/.ssh/vt_key -N '') && ` +
+      `grep -qF \"$(cat /home/${linuxUser}/.ssh/vt_key.pub)\" /home/${linuxUser}/.ssh/authorized_keys 2>/dev/null || cat /home/${linuxUser}/.ssh/vt_key.pub >> /home/${linuxUser}/.ssh/authorized_keys && ` +
+      `chmod 700 /home/${linuxUser}/.ssh && ` +
+      `chmod 600 /home/${linuxUser}/.ssh/authorized_keys /home/${linuxUser}/.ssh/vt_key && ` +
+      `chown -R ${linuxUser}:${linuxUser} /home/${linuxUser}/.ssh` +
+      `"`
+    ));
+
+    // Read keys via sudo since files are owned by vt_group_*
+    const { stdout: privKey, stderr: privErr } = await sshExec(conn, sudo(`cat /home/${linuxUser}/.ssh/vt_key`));
+    const { stdout: pubKey,  stderr: pubErr  } = await sshExec(conn, sudo(`cat /home/${linuxUser}/.ssh/vt_key.pub`));
+
+    console.log('[provision] privKey length:', privKey.trim().length, 'privErr:', privErr);
+    console.log('[provision] pubKey length:', pubKey.trim().length,  'pubErr:', pubErr);
+
+    if (!privKey.trim()) throw new Error(`Failed to read private key — sudo stderr: ${privErr}`);
+    if (!pubKey.trim())  throw new Error(`Failed to read public key — sudo stderr: ${pubErr}`);
+
+    // 5. Save everything to DB
+    const updateResult = db.prepare(`
+      UPDATE groups SET
+        provision_config_id = ?,
+        provision_root_path = ?,
+        linux_user = ?,
+        linux_pubkey = ?,
+        linux_privkey = ?,
+        provisioned_at = unixepoch()
+      WHERE id = ?
+    `).run(configId, rootPath, linuxUser, pubKey.trim(), privKey.trim(), group.id);
+    console.log('[provision] groups UPDATE changes:', updateResult.changes);
+
+    // 6. Create or UPDATE a group SSH config — connects as vt_group_* with generated key
+    const existingGroupCfg = db.prepare(
+      "SELECT id FROM ssh_configs WHERE group_id = ?"
+    ).get(group.id);
+    console.log('[provision] existingGroupCfg:', existingGroupCfg);
+
+    let groupCfgId;
+    if (!existingGroupCfg) {
+      console.log('[provision] Creating new ssh_config for group');
+      const cfgResult = db.prepare(
+        'INSERT INTO ssh_configs (owner_id, group_id, label, host, port, username, ssh_key, auth_type) VALUES (?,?,?,?,?,?,?,?)'
+      ).run(null, group.id, `[Group] ${group.name}`, cfgRow.host, cfgRow.port, linuxUser, privKey.trim(), 'key');
+      groupCfgId = cfgResult.lastInsertRowid;
+      console.log('[provision] New ssh_config id:', groupCfgId);
+
+      db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(group.id, groupCfgId);
+
+      db.prepare(
+        'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload, root_path) VALUES (?,?,?,1,1,0,1,1,?)'
+      ).run('group', group.id, groupCfgId, rootPath);
+    } else {
+      groupCfgId = existingGroupCfg.id;
+      console.log('[provision] Updating existing ssh_config id:', groupCfgId);
+      db.prepare(
+        "UPDATE ssh_configs SET ssh_key = ?, host = ?, port = ?, username = ?, auth_type = 'key' WHERE id = ?"
+      ).run(privKey.trim(), cfgRow.host, cfgRow.port, linuxUser, groupCfgId);
+      // Ensure group_configs link exists (may have been deleted)
+      db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(group.id, groupCfgId);
+      db.prepare(
+        "UPDATE permissions SET root_path = ? WHERE target_type='group' AND target_id = ? AND config_id = ?"
+      ).run(rootPath, group.id, groupCfgId);
+    }
+
+    auditLog(req.user.id, req.user.username, 'group_provision', group.name, `linux_user=${linuxUser}, root=${rootPath}`, getClientIp(req));
+    res.json({ ok: true, linux_user: linuxUser, root_path: rootPath, config_id: groupCfgId });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    if (conn) conn.end();
+  }
 });
 
 app.post('/groups/:id/members', authMiddleware, (req, res) => {

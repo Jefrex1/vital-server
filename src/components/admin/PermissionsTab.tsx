@@ -30,6 +30,7 @@ export function PermissionsTab({
     can_delete: false,
     can_terminal: false,
     can_upload: false,
+    root_path: "",
   });
   const [showNewPerm, setShowNewPerm] = useState(false);
 
@@ -59,9 +60,8 @@ export function PermissionsTab({
     const body = {
       ...newPerm,
       target_id: Number(newPerm.target_id),
-      config_id: newPerm.config_id
-        ? Number(newPerm.config_id)
-        : null,
+      config_id: newPerm.config_id ? Number(newPerm.config_id) : null,
+      root_path: newPerm.root_path || null,
     };
 
     const res = await fetch(`${API}/permissions`, {
@@ -170,6 +170,7 @@ export function PermissionsTab({
             {th("Delete")}
             {th("Terminal")}
             {th("Upload")}
+            {th("Root path")}
             {th("")}
           </tr>
         </thead>
@@ -184,6 +185,7 @@ export function PermissionsTab({
               {cell(flag(p.can_delete))}
               {cell(flag(p.can_terminal))}
               {cell(flag(p.can_upload))}
+              {cell(<span style={{ color: (p as any).root_path ? t.accent : t.textDim, fontFamily: "monospace", fontSize: 11 }}>{(p as any).root_path || "—"}</span>)}
               {cell(
                 <button
                   onClick={() => deletePerm(p.id)}
@@ -330,6 +332,13 @@ export function PermissionsTab({
               </label>
             ))}
           </div>
+
+          <Input
+            label="Root path (optional, e.g. /home/jefrex/minecraft)"
+            value={newPerm.root_path}
+            onChange={(v) => setNewPerm((p) => ({ ...p, root_path: v }))}
+            t={t}
+          />
 
           <button
             onClick={createPerm}

@@ -16,8 +16,11 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [allConfigs, setAllConfigs] = useState<SSHConfig[]>([]);
-  const [newGroup, setNewGroup] = useState({ name: "", description: "" });
+  const [newGroup, setNewGroup] = useState({ name: "", description: "", provision_config_id: "", provision_root_path: "" });
   const [showNewGroup, setShowNewGroup] = useState(false);
+  const [provisionModal, setProvisionModal] = useState<{ groupId: number; groupName: string; provision_config_id: string; provision_root_path: string } | null>(null);
+  const [provisionMsg, setProvisionMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [provisionLoading, setProvisionLoading] = useState(false);
   const [inviteModal, setInviteModal] = useState<{ groupId: number; groupName: string } | null>(null);
   const [inviteTarget, setInviteTarget] = useState("");
   const [inviteMsg, setInviteMsg] = useState("");
@@ -41,16 +44,41 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
   useEffect(() => { load(); }, [token]);
 
   async function createGroup() {
+    const body: any = { name: newGroup.name, description: newGroup.description };
+    if (newGroup.provision_config_id) body.provision_config_id = Number(newGroup.provision_config_id);
+    if (newGroup.provision_root_path) body.provision_root_path = newGroup.provision_root_path;
     const res = await fetch(`${API}/groups`, {
       method: "POST",
       headers: hdr,
-      body: JSON.stringify(newGroup),
+      body: JSON.stringify(body),
     });
     if (res.ok) {
       setShowNewGroup(false);
-      setNewGroup({ name: "", description: "" });
+      setNewGroup({ name: "", description: "", provision_config_id: "", provision_root_path: "" });
       load();
       onRefresh();
+    }
+  }
+
+  async function runProvision() {
+    if (!provisionModal) return;
+    setProvisionLoading(true);
+    setProvisionMsg(null);
+    const res = await fetch(`${API}/groups/${provisionModal.groupId}/provision`, {
+      method: "POST",
+      headers: hdr,
+      body: JSON.stringify({
+        provision_config_id: provisionModal.provision_config_id ? Number(provisionModal.provision_config_id) : undefined,
+        provision_root_path: provisionModal.provision_root_path || undefined,
+      }),
+    });
+    const data = await res.json();
+    setProvisionLoading(false);
+    if (res.ok) {
+      setProvisionMsg({ text: `✓ Provisioned! Linux user: ${data.linux_user}, path: ${data.root_path}`, ok: true });
+      load(); onRefresh();
+    } else {
+      setProvisionMsg({ text: "✕ " + data.error, ok: false });
     }
   }
 
@@ -193,6 +221,12 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button
+                  onClick={() => setProvisionModal({ groupId: g.id, groupName: g.name, provision_config_id: String((g as any).provision_config_id || ""), provision_root_path: (g as any).provision_root_path || "" })}
+                  style={{ background: (g as any).provisioned_at ? t.tagBg : t.accentBg, border: `1px solid ${(g as any).provisioned_at ? t.border : t.accentBorder}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: (g as any).provisioned_at ? t.green : t.accent, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  {(g as any).provisioned_at ? "⚙ Provisioned" : "⚙ Provision"}
+                </button>
+                <button
                   onClick={() => { setInviteModal({ groupId: g.id, groupName: g.name }); setInviteTarget(""); setInviteMsg(""); }}
                   style={{ background: t.accentBg, border: `1px solid ${t.accentBorder}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: t.accent, cursor: "pointer", fontFamily: "inherit" }}
                 >
@@ -330,20 +364,83 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
             onChange={(v) => setNewGroup((g) => ({ ...g, description: v }))}
             t={t}
           />
+          <div style={{ borderTop: `1px solid ${t.border}`, paddingTop: 12, marginTop: 4 }}>
+            <div style={{ fontSize: 10, color: t.textDim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
+              Provisioning (optional)
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <label style={{ fontSize: 10, color: t.textDim, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  Target server (SSH Config ID)
+                </label>
+                <select
+                  value={newGroup.provision_config_id}
+                  onChange={(e) => setNewGroup((g) => ({ ...g, provision_config_id: e.target.value }))}
+                  style={{ background: t.inputBg, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "8px 10px", color: t.text, fontFamily: "inherit", fontSize: 13, outline: "none" }}
+                >
+                  <option value="">— not set —</option>
+                  {allConfigs.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label || c.host} ({c.username}@{c.host})</option>
+                  ))}
+                </select>
+              </div>
+              <Input
+                label="Root directory (e.g. /home/jefrex/minecraft)"
+                value={newGroup.provision_root_path}
+                onChange={(v) => setNewGroup((g) => ({ ...g, provision_root_path: v }))}
+                t={t}
+              />
+            </div>
+          </div>
           <button
             onClick={createGroup}
-            style={{
-              background: t.accentBg,
-              border: `1px solid ${t.accentBorder}`,
-              borderRadius: 4,
-              padding: "9px",
-              fontSize: 13,
-              color: t.accent,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
+            style={{ background: t.accentBg, border: `1px solid ${t.accentBorder}`, borderRadius: 4, padding: "9px", fontSize: 13, color: t.accent, cursor: "pointer", fontFamily: "inherit" }}
           >
             Create
+          </button>
+        </Modal>
+      )}
+
+      {provisionModal && (
+        <Modal title={`Provision — "${provisionModal.groupName}"`} onClose={() => { setProvisionModal(null); setProvisionMsg(null); }} t={t} width={480}>
+          <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.6 }}>
+            Це створить Linux-юзера <code style={{ color: t.accent }}>vt_group_*</code> на цільовому сервері,
+            директорію, та SSH-ключ для групи. Члени групи будуть обмежені цією директорією.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <label style={{ fontSize: 10, color: t.textDim, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                Target server (root/sudo access required)
+              </label>
+              <select
+                value={provisionModal.provision_config_id}
+                onChange={(e) => setProvisionModal((m) => m ? { ...m, provision_config_id: e.target.value } : m)}
+                style={{ background: t.inputBg, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "8px 10px", color: t.text, fontFamily: "inherit", fontSize: 13, outline: "none" }}
+              >
+                <option value="">— select server —</option>
+                {allConfigs.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label || c.host} ({c.username}@{c.host})</option>
+                ))}
+              </select>
+            </div>
+            <Input
+              label="Root directory"
+              value={provisionModal.provision_root_path}
+              onChange={(v) => setProvisionModal((m) => m ? { ...m, provision_root_path: v } : m)}
+              t={t}
+            />
+          </div>
+          {provisionMsg && (
+            <div style={{ fontSize: 12, color: provisionMsg.ok ? t.green : t.red, lineHeight: 1.5 }}>
+              {provisionMsg.text}
+            </div>
+          )}
+          <button
+            onClick={runProvision}
+            disabled={provisionLoading}
+            style={{ background: t.accentBg, border: `1px solid ${t.accentBorder}`, borderRadius: 4, padding: "9px", fontSize: 13, color: t.accent, cursor: provisionLoading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: provisionLoading ? 0.6 : 1 }}
+          >
+            {provisionLoading ? "Provisioning…" : "Run Provision"}
           </button>
         </Modal>
       )}

@@ -20,12 +20,16 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
   const [tab, setTab] = useState<"my" | "invites">("my");
   const [showCreate, setShowCreate] = useState(false);
   const [createError, setCreateError] = useState("");
-  const [newGroup, setNewGroup] = useState({ name: "", description: "" });
+  const [newGroup, setNewGroup] = useState({ name: "", description: "", provision_config_id: "", provision_root_path: "" });
   const [inviteModal, setInviteModal] = useState<{ groupId: number; groupName: string } | null>(null);
   const [inviteTarget, setInviteTarget] = useState("");
   const [inviteMsg, setInviteMsg] = useState("");
   const [expandedGroup, setExpandedGroup] = useState<number | null>(null);
   const [addServerModal, setAddServerModal] = useState<{ groupId: number; groupName: string } | null>(null);
+  const [provisionModal, setProvisionModal] = useState<{ groupId: number; groupName: string; provision_config_id: string; provision_root_path: string } | null>(null);
+  const [provisionLoading, setProvisionLoading] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [sudoPassword, setSudoPassword] = useState("");
 
   const hdr = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
@@ -57,10 +61,42 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
   async function createGroup() {
     if (!newGroup.name) { setCreateError("Введіть назву групи"); return; }
     setCreateError("");
-    const res = await fetch(`${API}/groups`, { method: "POST", headers: hdr, body: JSON.stringify(newGroup) });
+    const body: any = { name: newGroup.name, description: newGroup.description };
+    if (newGroup.provision_config_id) body.provision_config_id = Number(newGroup.provision_config_id);
+    if (newGroup.provision_root_path) body.provision_root_path = newGroup.provision_root_path;
+    const res = await fetch(`${API}/groups`, { method: "POST", headers: hdr, body: JSON.stringify(body) });
     const data = await res.json();
-    if (res.ok) { setShowCreate(false); setNewGroup({ name: "", description: "" }); setCreateError(""); load(); }
+    if (res.ok) {
+      setShowCreate(false);
+      setNewGroup({ name: "", description: "", provision_config_id: "", provision_root_path: "" });
+      setCreateError("");
+      load();
+    }
     else setCreateError(data.error || "Помилка створення");
+  }
+
+  async function runProvision() {
+    if (!provisionModal) return;
+    setProvisionLoading(true);
+    setProvisionMsg(null);
+    const res = await fetch(`${API}/groups/${provisionModal.groupId}/provision`, {
+      method: "POST",
+      headers: hdr,
+      body: JSON.stringify({
+        provision_config_id: provisionModal.provision_config_id ? Number(provisionModal.provision_config_id) : undefined,
+        provision_root_path: provisionModal.provision_root_path || undefined,
+        sudo_password: sudoPassword || undefined,
+      }),
+    });
+    const data = await res.json();
+    setProvisionLoading(false);
+    setSudoPassword("");
+    if (res.ok) {
+      setProvisionMsg({ text: `✓ Готово! Linux user: ${data.linux_user}, шлях: ${data.root_path}`, ok: true });
+      load();
+    } else {
+      setProvisionMsg({ text: "✕ " + data.error, ok: false });
+    }
   }
 
   async function sendInvite() {
@@ -190,6 +226,12 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      {isOwner && (
+                        <button onClick={e => { e.stopPropagation(); const provisioned = (g as any).provisioned_at; setProvisionModal({ groupId: g.id, groupName: g.name, provision_config_id: String((g as any).provision_config_id || ""), provision_root_path: (g as any).provision_root_path || "" }); setProvisionMsg(null); }}
+                          style={{ background: (g as any).provisioned_at ? "transparent" : "transparent", border: `1px solid ${(g as any).provisioned_at ? t.border2 : t.border2}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: (g as any).provisioned_at ? (t.green || "#4caf50") : t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
+                          {(g as any).provisioned_at ? "⚙ Provisioned" : "⚙ Provision"}
+                        </button>
+                      )}
                       {isManager && (
                         <button onClick={e => { e.stopPropagation(); setInviteModal({ groupId: g.id, groupName: g.name }); }}
                           style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
@@ -316,6 +358,29 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
           <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "4px 0" }}>
             <Input t={t} placeholder="Назва групи" value={newGroup.name} onChange={v => setNewGroup(f => ({ ...f, name: v }))} />
             <Input t={t} placeholder="Опис (необов'язково)" value={newGroup.description} onChange={v => setNewGroup(f => ({ ...f, description: v }))} />
+
+            <div style={{ borderTop: `1px solid ${t.border2}`, paddingTop: 10, marginTop: 2 }}>
+              <div style={{ fontSize: 10, color: t.textDim, letterSpacing: "0.08em", textTransform: "uppercase" as const, marginBottom: 8 }}>
+                Провіжнінг (необов'язково)
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
+                <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
+                  <label style={{ fontSize: 10, color: t.textDim }}>Цільовий сервер</label>
+                  <select
+                    value={newGroup.provision_config_id}
+                    onChange={e => setNewGroup(f => ({ ...f, provision_config_id: e.target.value }))}
+                    style={{ background: t.bg2, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", color: t.text, fontFamily: "inherit", fontSize: 12, outline: "none" }}
+                  >
+                    <option value="">— не вказано —</option>
+                    {myConfigs.map(c => (
+                      <option key={c.id} value={c.id}>{c.label || c.host} ({c.host})</option>
+                    ))}
+                  </select>
+                </div>
+                <Input t={t} placeholder="Директорія, напр. /home/jefrex/minecraft" value={newGroup.provision_root_path} onChange={v => setNewGroup(f => ({ ...f, provision_root_path: v }))} />
+              </div>
+            </div>
+
             {createError && <div style={{ fontSize: 12, color: t.red }}>{createError}</div>}
             <button onClick={createGroup} style={{ background: t.red, border: "none", borderRadius: 4, padding: "8px 0", fontSize: 12, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
               Створити
@@ -364,6 +429,68 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                 </div>
               );
             })}
+          </div>
+        </Modal>
+      )}
+
+      {/* Provision modal — тільки для власника групи */}
+      {provisionModal && (
+        <Modal t={t} title={`Provision — "${provisionModal.groupName}"`} onClose={() => { setProvisionModal(null); setProvisionMsg(null); setSudoPassword(""); }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "4px 0" }}>
+            <div style={{ fontSize: 11, color: t.textDim, lineHeight: 1.6 }}>
+              Створить Linux-юзера <code style={{ color: t.red }}>vt_group_*</code> на сервері,
+              директорію і SSH-ключ для групи. Члени бачитимуть тільки свою папку.
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
+              <label style={{ fontSize: 10, color: t.textDim, textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>
+                Цільовий сервер
+              </label>
+              <select
+                value={provisionModal.provision_config_id}
+                onChange={e => setProvisionModal(m => m ? { ...m, provision_config_id: e.target.value } : m)}
+                style={{ background: t.bg2, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", color: t.text, fontFamily: "inherit", fontSize: 12, outline: "none" }}
+              >
+                <option value="">— виберіть сервер —</option>
+                {myConfigs.map(c => (
+                  <option key={c.id} value={c.id}>{c.label || c.host} ({c.host})</option>
+                ))}
+              </select>
+            </div>
+
+            <Input
+              t={t}
+              placeholder="Директорія, напр. /home/jefrex/minecraft"
+              value={provisionModal.provision_root_path}
+              onChange={v => setProvisionModal(m => m ? { ...m, provision_root_path: v } : m)}
+            />
+
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
+              <label style={{ fontSize: 10, color: t.textDim, textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>
+                Sudo пароль (якщо потрібен для useradd/groupadd)
+              </label>
+              <input
+                type="password"
+                value={sudoPassword}
+                onChange={e => setSudoPassword(e.target.value)}
+                placeholder="залиш порожнім якщо sudo без пароля"
+                style={{ background: t.bg2, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", color: t.text, fontFamily: "inherit", fontSize: 12, outline: "none" }}
+              />
+            </div>
+
+            {provisionMsg && (
+              <div style={{ fontSize: 12, color: provisionMsg.ok ? (t.green || "#4caf50") : t.red, lineHeight: 1.5 }}>
+                {provisionMsg.text}
+              </div>
+            )}
+
+            <button
+              onClick={runProvision}
+              disabled={provisionLoading}
+              style={{ background: t.red, border: "none", borderRadius: 4, padding: "8px 0", fontSize: 12, color: "#fff", cursor: provisionLoading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: provisionLoading ? 0.6 : 1 }}
+            >
+              {provisionLoading ? "Провіжнінг…" : "Запустити Provision"}
+            </button>
           </div>
         </Modal>
       )}
