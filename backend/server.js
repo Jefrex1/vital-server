@@ -499,6 +499,12 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
     await sshExec(conn, sudo(`sh -c "getent group ${linuxUser} || groupadd ${linuxUser}"`));
     await sshExec(conn, sudo(`sh -c "id ${linuxUser} 2>/dev/null || useradd -m -s /bin/bash -g ${linuxUser} ${linuxUser}"`));
 
+    // 1b. Add all current group members to the Linux group so they can access the folder
+    const groupMembers = db.prepare('SELECT u.username FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ?').all(group.id);
+    for (const member of groupMembers) {
+      await sshExec(conn, sudo(`sh -c "id '${member.username}' 2>/dev/null && usermod -aG ${linuxUser} '${member.username}' || true"`));
+    }
+
     // 2. Create root directory and set permissions
     await sshExec(conn, sudo(`sh -c "mkdir -p '${rootPath}' && chown ${linuxUser}:${linuxUser} '${rootPath}' && chmod 2770 '${rootPath}'"`) );
 
@@ -556,7 +562,7 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
       db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(group.id, groupCfgId);
 
       db.prepare(
-        'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload, root_path) VALUES (?,?,?,1,1,0,1,1,?)'
+        'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload, root_path) VALUES (?,?,?,1,1,1,1,1,?)'
       ).run('group', group.id, groupCfgId, rootPath);
     } else {
       groupCfgId = existingGroupCfg.id;
@@ -581,7 +587,7 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/groups/:id/members', authMiddleware, (req, res) => {
+app.post('/groups/:id/members', authMiddleware, async (req, res) => {
   const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!g) return res.status(404).json({ error: 'Not found' });
   if (req.user.role !== 'admin' && g.owner_id !== req.user.id)
@@ -590,6 +596,20 @@ app.post('/groups/:id/members', authMiddleware, (req, res) => {
   const safeRole = ['owner','moderator','member'].includes(group_role) ? group_role : 'member';
   try {
     db.prepare('INSERT OR REPLACE INTO group_members (group_id, user_id, group_role) VALUES (?,?,?)').run(req.params.id, user_id, safeRole);
+
+    // Якщо група провізіонована — додаємо юзера в Linux-групу на сервері
+    if (g.linux_user && g.provision_config_id) {
+      const newMember = db.prepare('SELECT username FROM users WHERE id = ?').get(user_id);
+      const cfgRow = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(g.provision_config_id);
+      if (newMember && cfgRow) {
+        try {
+          const conn = await sshConnect(normalizeConfig(cfgRow));
+          await sshExec(conn, `sudo sh -c "id '${newMember.username}' 2>/dev/null && usermod -aG ${g.linux_user} '${newMember.username}' || true"`);
+          conn.end();
+        } catch (e) { console.error('[members] usermod failed:', e.message); }
+      }
+    }
+
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -703,6 +723,19 @@ app.patch('/invites/:id', authMiddleware, (req, res) => {
   if (action === 'accept') {
     db.prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, group_role) VALUES (?,?,'member')").run(invite.group_id, req.user.id);
     auditLog(req.user.id, req.user.username, 'group_join_accepted', invite.group_id, null, getClientIp(req));
+
+    // Якщо група провізіонована — додаємо юзера в Linux-групу на сервері
+    const grp = db.prepare('SELECT * FROM groups WHERE id = ?').get(invite.group_id);
+    if (grp?.linux_user && grp?.provision_config_id) {
+      const cfgRow = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(grp.provision_config_id);
+      if (cfgRow) {
+        sshConnect(normalizeConfig(cfgRow)).then(conn => {
+          sshExec(conn, `sudo sh -c "id '${req.user.username}' 2>/dev/null && usermod -aG ${grp.linux_user} '${req.user.username}' || true"`)
+            .catch(e => console.error('[invite accept] usermod failed:', e.message))
+            .finally(() => conn.end());
+        }).catch(e => console.error('[invite accept] ssh connect failed:', e.message));
+      }
+    }
   } else {
     auditLog(req.user.id, req.user.username, 'group_join_declined', invite.group_id, null, getClientIp(req));
   }
@@ -787,9 +820,10 @@ app.get('/configs', authMiddleware, (req, res) => {
 
   // All users (including admin) see only their own configs + group-shared configs
   const rows = db.prepare(`
-    SELECT DISTINCT sc.* FROM ssh_configs sc
+    SELECT DISTINCT sc.*, g.provision_root_path FROM ssh_configs sc
     LEFT JOIN group_configs gc ON gc.config_id = sc.id
     LEFT JOIN group_members gm ON gm.group_id = gc.group_id AND gm.user_id = ?
+    LEFT JOIN groups g ON g.id = gc.group_id
     WHERE sc.owner_id = ?
       OR gm.user_id = ?
       OR (sc.owner_id IS NULL AND sc.group_id IS NULL)
@@ -926,6 +960,12 @@ wss.on('connection', (ws, req) => {
           stream.stderr.on('data', data => send('terminal:data', { data: data.toString() }));
           stream.on('close', () => { send('terminal:closed', {}); shellStream = null; });
           send('terminal:ready', {});
+          // Якщо є папка групи — одразу переходимо в неї після старту шелу
+          if (msg.provision_root_path) {
+            setTimeout(() => {
+              if (shellStream) shellStream.write(`cd ${JSON.stringify(msg.provision_root_path)}\n`);
+            }, 300);
+          }
         });
       } catch (e) { send('terminal:error', { error: e.message }); }
     }

@@ -14,6 +14,7 @@ export interface SSHConfig {
   auth_type?: "password" | "key";
   port: number;
   group_id?: number | null;
+  provision_root_path?: string | null;
 }
 
 export interface FileItem {

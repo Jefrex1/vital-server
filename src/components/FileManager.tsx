@@ -207,6 +207,16 @@ export function FileManager({
     if (!config || !token) return;
 
     async function initHome() {
+      // Якщо конфіг групи має прив'язану папку — одразу відкриваємо її
+      if (config!.provision_root_path) {
+        const home = config!.provision_root_path;
+        setHomeDir(home);
+        setCurrentPath(home);
+        loadDir(home);
+        loadTree(home);
+        return;
+      }
+
       let home = `/home/${config!.username}`;
 
       try {

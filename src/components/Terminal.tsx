@@ -151,6 +151,10 @@ export function Terminal({
             ssh_key: config.ssh_key,
             auth_type: config.auth_type,
           });
+        // Якщо є папка групи — передаємо, щоб термінал одразу там стартував
+        if (config.provision_root_path) {
+          payload.provision_root_path = config.provision_root_path;
+        }
         send(payload);
       }, 200);
 

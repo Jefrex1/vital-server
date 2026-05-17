@@ -380,31 +380,17 @@ export function ConfigPicker({
           </div>
         )}
 
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-          }}
-        >
-          {configs.length === 0 && (
-            <div
-              style={{
-                fontSize: 12,
-                color: t.textDim,
-                padding: "10px 0",
-              }}
-            >
-              No saved configs yet. Add one above.
-            </div>
-          )}
-          {configs.map((cfg) => (
+        {(() => {
+          const groupCfgs = configs.filter(c => c.group_id);
+          const personalCfgs = configs.filter(c => !c.group_id);
+
+          const renderCard = (cfg: SSHConfig, isGroup = false) => (
             <div
               key={cfg.id}
               onClick={() => onConnect(cfg)}
               style={{
                 background: t.bg3,
-                border: `1px solid ${t.border}`,
+                border: `1px solid ${isGroup ? t.accent + "55" : t.border}`,
                 borderRadius: 6,
                 padding: "12px 16px",
                 cursor: "pointer",
@@ -417,53 +403,68 @@ export function ConfigPicker({
                 (e.currentTarget.style.borderColor = t.accent)
               }
               onMouseLeave={(e) =>
-                (e.currentTarget.style.borderColor = t.border)
+                (e.currentTarget.style.borderColor = isGroup ? t.accent + "55" : t.border)
               }
             >
               <div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    color: t.text,
-                    marginBottom: 3,
-                  }}
-                >
+                <div style={{ fontSize: 13, color: t.text, marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
+                  {isGroup && <span style={{ fontSize: 11, background: t.accent + "22", color: t.accent, borderRadius: 3, padding: "1px 6px" }}>група</span>}
                   {cfg.label || cfg.host}
                 </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: t.textDim,
-                  }}
-                >
+                <div style={{ fontSize: 11, color: t.textDim }}>
                   {cfg.username}@{cfg.host}:{cfg.port} ·{" "}
-                  {cfg.auth_type === "key"
-                    ? "🗝 key"
-                    : "🔑 pw"}
+                  {cfg.auth_type === "key" ? "🗝 key" : "🔑 pw"}
+                  {cfg.provision_root_path && (
+                    <span style={{ marginLeft: 6, opacity: 0.7 }}>📁 {cfg.provision_root_path}</span>
+                  )}
                 </div>
               </div>
-              <button
-                onClick={(e) => deleteConfig(cfg.id!, e)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: t.textDim,
-                  cursor: "pointer",
-                  fontSize: 15,
-                  padding: "4px 6px",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.color = t.red)
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.color = t.textDim)
-                }
-              >
-                ✕
-              </button>
+              {!isGroup && (
+                <button
+                  onClick={(e) => deleteConfig(cfg.id!, e)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: t.textDim,
+                    cursor: "pointer",
+                    fontSize: 15,
+                    padding: "4px 6px",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = t.red)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = t.textDim)}
+                >
+                  ✕
+                </button>
+              )}
             </div>
-          ))}
-        </div>
+          );
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {groupCfgs.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontSize: 11, color: t.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Групові сервери
+                  </div>
+                  {groupCfgs.map(cfg => renderCard(cfg, true))}
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {groupCfgs.length > 0 && (
+                  <div style={{ fontSize: 11, color: t.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Мої сервери
+                  </div>
+                )}
+                {personalCfgs.length === 0 && groupCfgs.length === 0 && (
+                  <div style={{ fontSize: 12, color: t.textDim, padding: "10px 0" }}>
+                    No saved configs yet. Add one above.
+                  </div>
+                )}
+                {personalCfgs.map(cfg => renderCard(cfg, false))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
