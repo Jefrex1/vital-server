@@ -763,6 +763,59 @@ app.delete('/groups/:id/configs/:cid', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Share file/folder with group via symlinks ────────────────────────────────
+// Creates ln -sfn <sourcePath> /home/<member>/<name> for every group member
+app.post('/groups/:id/share', authMiddleware, async (req, res) => {
+  const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
+  if (!group) return res.status(404).json({ error: 'Group not found' });
+
+  // Must be a member of the group
+  const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id=? AND user_id=?').get(group.id, req.user.id);
+  if (!isMember && req.user.role !== 'admin') return res.status(403).json({ error: 'Not a group member' });
+
+  const { source_path, config_id } = req.body;
+  if (!source_path) return res.status(400).json({ error: 'source_path required' });
+  if (!config_id)   return res.status(400).json({ error: 'config_id required' });
+
+  const cfgRow = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(config_id);
+  if (!cfgRow) return res.status(404).json({ error: 'Config not found' });
+
+  const members = db.prepare(`
+    SELECT u.username FROM group_members gm
+    JOIN users u ON u.id = gm.user_id
+    WHERE gm.group_id = ?
+  `).all(group.id);
+
+  const itemName = source_path.split('/').pop();
+  const errors = [];
+  let conn;
+
+  try {
+    conn = await sshConnect(normalizeConfig(cfgRow));
+
+    for (const member of members) {
+      const linkPath = `/home/${member.username}/${itemName}`;
+      // ln -sfn = create/overwrite symlink; works for files and dirs
+      const { stderr } = await sshExec(conn,
+        `ln -sfn "${source_path}" "${linkPath}" 2>&1`
+      );
+      if (stderr) errors.push(`${member.username}: ${stderr.trim()}`);
+    }
+
+    auditLog(req.user.id, req.user.username, 'share_path', group.name, `path=${source_path}`, getClientIp(req));
+
+    if (errors.length) {
+      res.json({ ok: true, warnings: errors });
+    } else {
+      res.json({ ok: true, linked: members.length });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    if (conn) conn.end();
+  }
+});
+
 // ─── Account Settings ─────────────────────────────────────────────────────────
 app.get('/account/settings', authMiddleware, (req, res) => {
   const settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);

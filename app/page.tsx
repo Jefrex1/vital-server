@@ -137,11 +137,11 @@ export default function Page() {
   }
 
   if (view === "groups") {
-    return <GroupsPanel token={token} authUser={authUser} t={t} onClose={() => navigate("picker")} />;
+    return <GroupsPanel token={token} authUser={authUser} t={t} onClose={() => navigate(config ? "file-manager" : "picker")} />;
   }
 
   if (view === "account") {
-    return <AccountSettings token={token} authUser={authUser} t={t} onClose={() => navigate("picker")} onThemeChange={handleThemeChange} />;
+    return <AccountSettings token={token} authUser={authUser} t={t} onClose={() => navigate(config ? "file-manager" : "picker")} onThemeChange={handleThemeChange} />;
   }
 
   if (view === "admin") {

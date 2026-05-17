@@ -409,7 +409,7 @@ export function ConfigPicker({
               <div>
                 <div style={{ fontSize: 13, color: t.text, marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
                   {isGroup && <span style={{ fontSize: 11, background: t.accent + "22", color: t.accent, borderRadius: 3, padding: "1px 6px" }}>група</span>}
-                  {cfg.label || cfg.host}
+                  {(cfg.label || cfg.host).replace(/^\[Group\]\s*/i, "")}
                 </div>
                 <div style={{ fontSize: 11, color: t.textDim }}>
                   {cfg.username}@{cfg.host}:{cfg.port} ·{" "}

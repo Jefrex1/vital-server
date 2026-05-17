@@ -79,6 +79,7 @@ export function FileManager({
   const [memH, setMemH] = useState<number[]>([0]);
   const [notification, setNotification] = useState("");
   const [searchQ, setSearchQ] = useState("");
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [wsStatus, setWsStatus] = useState<
     "connecting" | "connected" | "disconnected"
   >("connecting");
@@ -575,6 +576,95 @@ export function FileManager({
     };
 
     inp.click();
+  }
+
+  // Inline item creation (Windows-style)
+  const [newItem, setNewItem] = useState<{ type: "dir" | "file" } | null>(null);
+  const [newItemName, setNewItemName] = useState("");
+  const newItemInputRef = useRef<HTMLInputElement>(null);
+
+  // Share with group modal
+  const [shareModal, setShareModal] = useState<{ path: string; name: string } | null>(null);
+  const [userGroups, setUserGroups] = useState<{ id: number; name: string }[]>([]);
+  const [shareGroupId, setShareGroupId] = useState<number | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+
+  function startCreate(type: "dir" | "file") {
+    setNewItem({ type });
+    setNewItemName(type === "dir" ? "Нова папка" : "новий_файл.txt");
+    setTimeout(() => {
+      newItemInputRef.current?.focus();
+      newItemInputRef.current?.select();
+    }, 50);
+  }
+
+  async function commitCreate() {
+    const name = newItemName.trim();
+    setNewItem(null);
+    setNewItemName("");
+    if (!name) return;
+    try {
+      if (newItem?.type === "dir") {
+        await api("/files/mkdir", { path: joinPath(currentPath, name) });
+      } else {
+        await api("/files/write", { path: joinPath(currentPath, name), content: "" });
+      }
+      notify("Створено ✓");
+      loadDir(currentPath);
+      if (newItem?.type === "dir") loadTree(homeDir);
+    } catch (e: any) {
+      notify("Помилка: " + e.message);
+    }
+  }
+
+  function cancelCreate() {
+    setNewItem(null);
+    setNewItemName("");
+  }
+
+  async function openShareModal(item: FileItem) {
+    const path = joinPath(currentPath, item.name);
+    setShareModal({ path, name: item.name });
+    setShareGroupId(null);
+    // Load user's groups
+    try {
+      const res = await fetch(`${API}/groups`, { headers: { Authorization: `Bearer ${token}` } });
+      const all = await res.json();
+      setUserGroups(all.filter((g: any) =>
+        g.members?.some((m: any) => m.id === authUser.id || m.username === authUser.username)
+      ));
+    } catch {}
+  }
+
+  async function shareWithGroup() {
+    if (!shareModal || !shareGroupId) return;
+    setShareLoading(true);
+    try {
+      // Creates ln -sfn <sourcePath> ~/name for every group member
+      const res = await fetch(`${API}/groups/${shareGroupId}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          source_path: shareModal.path,
+          config_id: config?.id,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.warnings?.length) {
+          notify(`Поділились (є попередження для деяких юзерів)`);
+        } else {
+          notify(`Symlink створено для ${data.linked} учасників ✓`);
+        }
+      } else {
+        notify("Помилка: " + data.error);
+      }
+    } catch (e: any) {
+      notify("Помилка: " + e.message);
+    } finally {
+      setShareLoading(false);
+      setShareModal(null);
+    }
   }
 
   const home = homeDir || (config ? `/home/${config.username}` : "");
@@ -1567,6 +1657,86 @@ export function FileManager({
                 )
               )}
 
+              {/* "+ Створити" dropdown */}
+              <div style={{ position: "relative", marginLeft: 4 }}>
+                <button
+                  className="abtn"
+                  onClick={() => setCreateMenuOpen(o => !o)}
+                  style={{
+                    background: createMenuOpen ? t.bg4 : "transparent",
+                    border: `1px solid ${t.accent}55`,
+                    borderRadius: 4,
+                    padding: `${isMobile ? 4 : 5}px ${isMobile ? 8 : 11}px`,
+                    fontSize: isMobile ? 11 : 12,
+                    color: t.accent,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  + Створити ▾
+                </button>
+                {createMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 4px)",
+                      left: 0,
+                      background: t.bg2,
+                      border: `1px solid ${t.border2}`,
+                      borderRadius: 6,
+                      zIndex: 200,
+                      minWidth: 160,
+                      boxShadow: "0 4px 16px #0006",
+                      overflow: "hidden",
+                    }}
+                    onMouseLeave={() => setCreateMenuOpen(false)}
+                  >
+                    {[
+                      { label: "📁 Нова папка", type: "dir" as const },
+                      { label: "📄 Новий файл", type: "file" as const },
+                    ].map(({ label, type }) => (
+                      <div
+                        key={type}
+                        onClick={() => { setCreateMenuOpen(false); startCreate(type); }}
+                        style={{
+                          padding: "10px 16px",
+                          fontSize: 13,
+                          color: t.text,
+                          cursor: "pointer",
+                          borderBottom: `1px solid ${t.border}`,
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = t.bg4)}
+                        onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                      >
+                        {label}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Share with group button */}
+              {selectedNames.size === 1 && primarySelected && (
+                <button
+                  className="abtn"
+                  onClick={() => openShareModal(primarySelected)}
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${t.border}`,
+                    borderRadius: 4,
+                    padding: `${isMobile ? 4 : 5}px ${isMobile ? 8 : 11}px`,
+                    fontSize: isMobile ? 11 : 12,
+                    color: t.textDim,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  Поділитись
+                </button>
+              )}
+
               {selectedNames.size > 0 && (
                 <span
                   style={{
@@ -1755,6 +1925,47 @@ export function FileManager({
                         );
                       })
                     )}
+
+                    {/* Inline create row — Windows Explorer style */}
+                    {newItem && (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "8px 4px",
+                          borderRadius: 6,
+                          background: t.bg4,
+                          border: `1px solid ${t.accent}`,
+                        }}
+                      >
+                        <span style={{ fontSize: 32 }}>{newItem.type === "dir" ? "📁" : "📄"}</span>
+                        <input
+                          ref={newItemInputRef}
+                          value={newItemName}
+                          onChange={e => setNewItemName(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") commitCreate();
+                            if (e.key === "Escape") cancelCreate();
+                          }}
+                          onBlur={commitCreate}
+                          style={{
+                            width: "100%",
+                            background: t.bg2,
+                            border: `1px solid ${t.accent}`,
+                            borderRadius: 3,
+                            padding: "3px 6px",
+                            fontSize: 12,
+                            color: t.text,
+                            fontFamily: "inherit",
+                            textAlign: "center",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {showPreview && (
@@ -1783,6 +1994,42 @@ export function FileManager({
             </div>
           </div>
         </div>
+
+        {/* Share with group modal */}
+        {shareModal && (
+          <div style={{ position: "fixed", inset: 0, background: "#0008", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ background: t.bg2, border: `1px solid ${t.border2}`, borderRadius: 8, padding: "24px 28px", width: "min(400px, 92vw)", display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ fontSize: 14, color: t.text, fontWeight: 600 }}>Поділитись з групою</div>
+              <div style={{ fontSize: 12, color: t.textDim }}>
+                📄 {shareModal.name}
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 6 }}>Виберіть групу</label>
+                <select
+                  value={shareGroupId ?? ""}
+                  onChange={e => setShareGroupId(Number(e.target.value) || null)}
+                  style={{ width: "100%", background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", fontSize: 12, color: t.text, fontFamily: "inherit" }}
+                >
+                  <option value="">— оберіть групу —</option>
+                  {userGroups.map(g => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ fontSize: 11, color: t.textDim, background: t.bg3, borderRadius: 4, padding: "8px 10px" }}>
+                Створить <strong>symlink</strong> у домашній папці кожного учасника групи — всі бачать і редагують один і той самий файл/папку.
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => setShareModal(null)} style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 16px", fontSize: 12, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
+                  Скасувати
+                </button>
+                <button onClick={shareWithGroup} disabled={!shareGroupId || shareLoading} style={{ background: t.accent, border: "none", borderRadius: 4, padding: "7px 16px", fontSize: 12, color: "#fff", cursor: shareGroupId && !shareLoading ? "pointer" : "not-allowed", fontFamily: "inherit", opacity: shareGroupId && !shareLoading ? 1 : 0.5 }}>
+                  {shareLoading ? "Застосування..." : "Поділитись"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {notification && (
           <div

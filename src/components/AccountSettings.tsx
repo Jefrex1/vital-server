@@ -101,13 +101,13 @@ export function AccountSettings({ token, authUser, t, onClose, onThemeChange }: 
             </div>
             <div>
               <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 4 }}>Про себе</label>
-              <textarea value={settings.bio || ""} onChange={v => setSettings(s => ({ ...s, bio: v }))}
+              <textarea value={settings.bio || ""} onChange={e => setSettings(s => ({ ...s, bio: e.target.value }))}
                 placeholder="Короткий опис..." rows={3}
                 style={{ width: "100%", background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "8px 10px", fontSize: 12, color: t.text, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
             </div>
             <div>
               <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 4 }}>Тема</label>
-              <select value={settings.theme} onChange={v => setSettings(s => ({ ...s, theme: v }))}
+              <select value={settings.theme} onChange={e => setSettings(s => ({ ...s, theme: e.target.value }))}
                 style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", fontSize: 12, color: t.text, fontFamily: "inherit", width: "100%" }}>
                 <option value="dark">Темна</option>
                 <option value="light">Світла</option>
