@@ -27,6 +27,10 @@ export function isVideoFile(name: string): boolean {
   return ["mp4", "mkv", "avi", "mov", "webm"].includes(fileExtension(name));
 }
 
+export function isAudioFile(name: string): boolean {
+  return ["mp3", "ogg", "wav", "flac", "aac", "m4a", "opus"].includes(fileExtension(name));
+}
+
 export function isImageFile(name: string): boolean {
   return ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico"].includes(fileExtension(name));
 }

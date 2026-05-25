@@ -6,12 +6,15 @@ import { API, THEMES } from "@/constants/themes";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
 import { IconUsers, IconSettings, IconShield2, IconKey, IconFolder, IconX } from "./ui/Icons";
+import { I18N, Language } from "@/i18n";
 
 interface ConfigPickerProps {
   token: string;
   authUser: AuthUser;
   onConnect: (cfg: SSHConfig) => void;
   t: typeof THEMES.dark;
+  language: Language;
+  onLanguageChange: (language: Language) => void;
   onGroupsClick: () => void;
   onAccountClick: () => void;
   onAdminClick?: () => void;
@@ -23,11 +26,14 @@ export function ConfigPicker({
   authUser,
   onConnect,
   t,
+  language,
+  onLanguageChange,
   onGroupsClick,
   onAccountClick,
   onAdminClick,
   onLogout,
 }: ConfigPickerProps) {
+  const l = I18N[language];
   const [configs, setConfigs] = useState<SSHConfig[]>([]);
   const [pendingInvites, setPendingInvites] = useState(0);
   const [showAdd, setShowAdd] = useState(false);
@@ -126,12 +132,21 @@ export function ConfigPicker({
               <line x1="12" y1="19" x2="20" y2="19" />
             </svg>
             <span style={{ fontSize: 14, color: t.text }}>oServer</span>
-            <span style={{ fontSize: 11, color: t.textDim }}>— підключення</span>
+            <span style={{ fontSize: 11, color: t.textDim }}>- {l.titleSuffixConnect}</span>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select
+              value={language}
+              onChange={(e) => onLanguageChange(e.target.value as Language)}
+              title={l.language}
+              style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 8px", fontSize: 12, color: t.textMid, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              <option value="uk">UA</option>
+              <option value="en">EN</option>
+            </select>
             <button onClick={() => setShowAdd((s) => !s)}
               style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 12, color: t.textMid, cursor: "pointer", fontFamily: "inherit" }}>
-              + Додати
+              + {l.add}
             </button>
           </div>
         </div>
@@ -140,7 +155,7 @@ export function ConfigPicker({
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button onClick={onGroupsClick}
             style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
-            <IconUsers size={12} color="currentColor" /> Групи
+            <IconUsers size={12} color="currentColor" /> {l.groups}
             {pendingInvites > 0 && <span style={{ background: t.red, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 10 }}>{pendingInvites}</span>}
           </button>
           <button onClick={onAccountClick}
@@ -150,18 +165,18 @@ export function ConfigPicker({
           {onAdminClick && (
             <button onClick={onAdminClick}
               style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
-              <IconShield2 size={12} color="currentColor" /> Адмін
+            <IconShield2 size={12} color="currentColor" /> {l.admin}
             </button>
           )}
           <button onClick={onLogout}
             style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.red, cursor: "pointer", fontFamily: "inherit", marginLeft: "auto" }}>
-            Вийти
+            {l.logout}
           </button>
         </div>
 
         {/* User info */}
         <div style={{ background: t.bg4, border: `1px solid ${t.border}`, borderRadius: 4, padding: "8px 12px", fontSize: 11, color: t.textDim }}>
-          Увійшли як <span style={{ color: t.text }}>@{authUser.username}</span>
+          {l.signedInAs} <span style={{ color: t.text }}>@{authUser.username}</span>
           {authUser.role === "admin" && <span style={{ color: t.red, marginLeft: 8 }}>[admin]</span>}
         </div>
 
@@ -376,7 +391,7 @@ export function ConfigPicker({
                 fontFamily: "inherit",
               }}
             >
-              {loading ? "Saving…" : "Save config"}
+              {loading ? "Saving..." : l.saveConfig}
             </button>
           </div>
         )}
@@ -409,7 +424,8 @@ export function ConfigPicker({
             >
               <div>
                 <div style={{ fontSize: 13, color: t.text, marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
-                  {isGroup && <span style={{ fontSize: 11, background: t.accent + "22", color: t.accent, borderRadius: 3, padding: "1px 6px" }}>група</span>}
+                  {isGroup && <span style={{ fontSize: 11, background: t.accent + "22", color: t.accent, borderRadius: 3, padding: "1px 6px" }}>{l.group}</span>}
+                  {isGroup && cfg.access_role && <span style={{ fontSize: 10, background: t.bg2, color: t.textDim, border: `1px solid ${t.border}`, borderRadius: 3, padding: "1px 6px" }}>{cfg.access_role}</span>}
                   {(cfg.label || cfg.host).replace(/^\[Group\]\s*/i, "")}
                 </div>
                 <div style={{ fontSize: 11, color: t.textDim }}>
@@ -445,7 +461,7 @@ export function ConfigPicker({
               {groupCfgs.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <div style={{ fontSize: 11, color: t.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    Групові сервери
+                    {l.groupServers}
                   </div>
                   {groupCfgs.map(cfg => renderCard(cfg, true))}
                 </div>
@@ -453,12 +469,12 @@ export function ConfigPicker({
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {groupCfgs.length > 0 && (
                   <div style={{ fontSize: 11, color: t.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    Мої сервери
+                    {l.myServers}
                   </div>
                 )}
                 {personalCfgs.length === 0 && groupCfgs.length === 0 && (
                   <div style={{ fontSize: 12, color: t.textDim, padding: "10px 0" }}>
-                    No saved configs yet. Add one above.
+                    {l.noConfigs}
                   </div>
                 )}
                 {personalCfgs.map(cfg => renderCard(cfg, false))}

@@ -1,20 +1,24 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { AuthUser, GroupRow, GroupInvite, SSHConfig } from "@/types";
+import { AccessRole, AuthUser, GroupRow, GroupInvite, SSHConfig } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
 import { IconCrown, IconShield, IconUser, IconChevronUp, IconChevronDown, IconX, IconSettings, IconArrowLeft } from "./ui/Icons";
+import { I18N, Language } from "@/i18n";
 
 interface GroupsPanelProps {
   token: string;
   authUser: AuthUser;
   t: typeof THEMES.dark;
+  language: Language;
+  onLanguageChange: (language: Language) => void;
   onClose: () => void;
 }
 
-export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
+export function GroupsPanel({ token, authUser, t, language, onLanguageChange, onClose }: GroupsPanelProps) {
+  const l = I18N[language];
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [invites, setInvites] = useState<GroupInvite[]>([]);
   const [myConfigs, setMyConfigs] = useState<SSHConfig[]>([]);
@@ -27,6 +31,7 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
   const [inviteMsg, setInviteMsg] = useState("");
   const [expandedGroup, setExpandedGroup] = useState<number | null>(null);
   const [addServerModal, setAddServerModal] = useState<{ groupId: number; groupName: string } | null>(null);
+  const [serverAccessRole, setServerAccessRole] = useState<AccessRole>("operator");
   const [provisionModal, setProvisionModal] = useState<{ groupId: number; groupName: string; provision_config_id: string; provision_root_path: string } | null>(null);
   const [provisionLoading, setProvisionLoading] = useState(false);
   const [provisionMsg, setProvisionMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -60,7 +65,7 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
   }
 
   async function createGroup() {
-    if (!newGroup.name) { setCreateError("Введіть назву групи"); return; }
+    if (!newGroup.name) { setCreateError(l.nameRequired); return; }
     setCreateError("");
     const body: any = { name: newGroup.name, description: newGroup.description };
     if (newGroup.provision_config_id) body.provision_config_id = Number(newGroup.provision_config_id);
@@ -116,8 +121,8 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
     load();
   }
 
-  async function addServerToGroup(groupId: number, configId: number) {
-    await fetch(`${API}/groups/${groupId}/configs`, { method: "POST", headers: hdr, body: JSON.stringify({ config_id: configId }) });
+  async function addServerToGroup(groupId: number, configId: number, access_role: AccessRole) {
+    await fetch(`${API}/groups/${groupId}/configs`, { method: "POST", headers: hdr, body: JSON.stringify({ config_id: configId, access_role }) });
     load();
   }
 
@@ -155,6 +160,11 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
     member: <><IconUser size={10} color="currentColor" /> учасник</>,
   };
   const ROLE_COLOR: Record<string, string> = { owner: t.red || "#e53935", moderator: "#7c4dff", member: t.textDim };
+  const ACCESS_LABELS: Record<AccessRole, string> = {
+    admin: l.roleAdmin,
+    operator: l.roleOperator,
+    observer: l.roleObserver,
+  };
 
   const tabBtn = (id: typeof tab, label: string, badge?: number) => (
     <button onClick={() => setTab(id)} style={{
@@ -182,14 +192,23 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={t.red} strokeWidth="2.5"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           <span style={{ fontSize: 14, color: t.text }}>oServer</span>
-          <span style={{ fontSize: 11, color: t.textDim }}>— групи</span>
+          <span style={{ fontSize: 11, color: t.textDim }}>- {l.titleSuffixGroups}</span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setShowCreate(true)} style={{ background: t.red, border: "none", borderRadius: 4, padding: "5px 12px", fontSize: 11, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-            + Нова група
+          <select
+            value={language}
+            onChange={(e) => onLanguageChange(e.target.value as Language)}
+            title={l.language}
+            style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 8px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            <option value="uk">UA</option>
+            <option value="en">EN</option>
+          </select>
+          <button onClick={() => setShowCreate(true)} style={{ background: t.accentBg, border: `1px solid ${t.accentBorder}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.accent, cursor: "pointer", fontFamily: "inherit" }}>
+            + {l.createGroup}
           </button>
           <button onClick={onClose} style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
-            <IconArrowLeft size={11} color="currentColor" /> Назад
+            <IconArrowLeft size={11} color="currentColor" /> {l.back}
           </button>
         </div>
       </div>
@@ -197,16 +216,16 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
       <div style={{ flex: 1, padding: "20px", maxWidth: 720, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         {/* Tabs */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {tabBtn("my", "Мої групи")}
-          {tabBtn("invites", "Запрошення", invites.length || undefined)}
+          {tabBtn("my", l.myGroups)}
+          {tabBtn("invites", l.invites, invites.length || undefined)}
         </div>
 
         {tab === "my" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {myGroups.length === 0 && (
               <div style={{ textAlign: "center", color: t.textDim, fontSize: 13, padding: "40px 0" }}>
-                Ви ще не є учасником жодної групи.<br/>
-                <span style={{ fontSize: 11 }}>Створіть групу або прийміть запрошення.</span>
+                {l.noGroups}<br/>
+                <span style={{ fontSize: 11 }}>{language === "uk" ? "Створіть групу або прийміть запрошення." : "Create a group or accept an invite."}</span>
               </div>
             )}
             {myGroups.map(g => {
@@ -244,9 +263,9 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                         </button>
                       )}
                       {isManager && (
-                        <button onClick={e => { e.stopPropagation(); setAddServerModal({ groupId: g.id, groupName: g.name }); }}
+                        <button onClick={e => { e.stopPropagation(); setServerAccessRole("operator"); setAddServerModal({ groupId: g.id, groupName: g.name }); }}
                           style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
-                          + Сервер
+                          + {language === "uk" ? "Сервер" : "Server"}
                         </button>
                       )}
                       {!isOwner && (
@@ -301,13 +320,14 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                       {/* Servers */}
                       <div>
                         <div style={{ fontSize: 11, color: t.textDim, marginBottom: 6 }}>СЕРВЕРИ</div>
-                        {(g.configs || []).length === 0 && <div style={{ fontSize: 11, color: t.textDim }}>Немає серверів</div>}
+                        {(g.configs || []).length === 0 && <div style={{ fontSize: 11, color: t.textDim }}>{l.noGroupServers}</div>}
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           {(g.configs || []).map(c => (
                             <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: t.bg2, borderRadius: 4, padding: "5px 10px" }}>
                               <div>
                                 <span style={{ fontSize: 12, color: t.text }}>{c.label}</span>
                                 <span style={{ fontSize: 10, color: t.textDim, marginLeft: 8 }}>{c.host}:{c.port}</span>
+                                <span style={{ fontSize: 10, color: t.accent, marginLeft: 8 }}>{ACCESS_LABELS[(c.access_role || "operator") as AccessRole]}</span>
                               </div>
                               {isManager && (
                                 <button onClick={() => removeServerFromGroup(g.id, c.id)}
@@ -329,7 +349,7 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {invites.length === 0 && (
               <div style={{ textAlign: "center", color: t.textDim, fontSize: 13, padding: "40px 0" }}>
-                Немає нових запрошень.
+                {l.noInvites}
               </div>
             )}
             {invites.map(inv => (
@@ -359,7 +379,7 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
 
       {/* Create group modal */}
       {showCreate && (
-        <Modal t={t} title="Нова група" onClose={() => setShowCreate(false)}>
+        <Modal t={t} title={l.createGroup} onClose={() => setShowCreate(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "4px 0" }}>
             <Input t={t} placeholder="Назва групи" value={newGroup.name} onChange={v => setNewGroup(f => ({ ...f, name: v }))} />
             <Input t={t} placeholder="Опис (необов'язково)" value={newGroup.description} onChange={v => setNewGroup(f => ({ ...f, description: v }))} />
@@ -387,8 +407,8 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
             </div>
 
             {createError && <div style={{ fontSize: 12, color: t.red }}>{createError}</div>}
-            <button onClick={createGroup} style={{ background: t.red, border: "none", borderRadius: 4, padding: "8px 0", fontSize: 12, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-              Створити
+            <button onClick={createGroup} style={{ background: t.accentBg, border: `1px solid ${t.accentBorder}`, borderRadius: 4, padding: "8px 0", fontSize: 12, color: t.accent, cursor: "pointer", fontFamily: "inherit" }}>
+              {l.create}
             </button>
           </div>
         </Modal>
@@ -411,8 +431,20 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
 
       {/* Add server to group modal */}
       {addServerModal && (
-        <Modal t={t} title={`Додати сервер до "${addServerModal.groupName}"`} onClose={() => setAddServerModal(null)}>
+        <Modal t={t} title={`${l.addServer}: "${addServerModal.groupName}"`} onClose={() => setAddServerModal(null)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 0", maxHeight: 320, overflowY: "auto" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: t.textDim }}>
+              {language === "uk" ? "Права доступу" : "Access role"}
+              <select
+                value={serverAccessRole}
+                onChange={(e) => setServerAccessRole(e.target.value as AccessRole)}
+                style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", fontSize: 12, color: t.text, fontFamily: "inherit" }}
+              >
+                <option value="admin">{l.roleAdmin}</option>
+                <option value="operator">{l.roleOperator}</option>
+                <option value="observer">{l.roleObserver}</option>
+              </select>
+            </label>
             {myConfigs.length === 0 && <div style={{ fontSize: 12, color: t.textDim }}>У вас немає серверів. Додайте спочатку сервер.</div>}
             {myConfigs.map(c => {
               const g = groups.find(gr => gr.id === addServerModal.groupId);
@@ -426,9 +458,9 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                   {alreadyAdded ? (
                     <span style={{ fontSize: 10, color: t.textDim }}>Вже додано</span>
                   ) : (
-                    <button onClick={() => { addServerToGroup(addServerModal.groupId, c.id!); }}
-                      style={{ background: t.red, border: "none", borderRadius: 4, padding: "4px 10px", fontSize: 11, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-                      + Додати
+                    <button onClick={() => { addServerToGroup(addServerModal.groupId, c.id!, serverAccessRole); }}
+                      style={{ background: t.accentBg, border: `1px solid ${t.accentBorder}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: t.accent, cursor: "pointer", fontFamily: "inherit" }}>
+                      + {l.add}
                     </button>
                   )}
                 </div>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { AuthUser, SSHConfig, Theme } from "@/types";
-import { THEMES } from "@/constants/themes";
+import { THEMES, API } from "@/constants/themes";
 import { LoginScreen } from "@/components/LoginScreen";
 import { RegisterScreen } from "@/components/RegisterScreen";
 import { ConfigPicker } from "@/components/ConfigPicker";
@@ -10,6 +10,7 @@ import { AdminPanel } from "@/components/AdminPanel";
 import { FileManager } from "@/components/FileManager";
 import { GroupsPanel } from "@/components/GroupsPanel";
 import { AccountSettings } from "@/components/AccountSettings";
+import type { Language } from "@/i18n";
 
 type Screen = "login" | "register";
 type AppView = "picker" | "groups" | "account" | "file-manager" | "admin";
@@ -38,6 +39,7 @@ export default function Page() {
   const [view, setView] = useState<AppView>("picker");
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [screen, setScreen] = useState<Screen>("login");
+  const [language, setLanguage] = useState<Language>("uk");
 
   const t = (THEMES as Record<string, typeof THEMES.dark>)[theme] ?? THEMES.dark;
 
@@ -73,6 +75,7 @@ export default function Page() {
       const savedToken = sessionStorage.getItem("oserver_token");
       const savedCfg = sessionStorage.getItem("oserver_config");
       const savedTheme = sessionStorage.getItem("oserver_theme") as Theme;
+      const savedLanguage = sessionStorage.getItem("oserver_language") as Language;
 
       if (savedUser && savedToken) {
         setAuthUser(JSON.parse(savedUser));
@@ -81,6 +84,7 @@ export default function Page() {
       if (savedCfg) setConfig(JSON.parse(savedCfg));
       const validThemes: Theme[] = ["dark", "light", "void", "lakers", "electric", "forest", "neon", "void-light", "lakers-light", "electric-light", "forest-light", "neon-light"];
       if (validThemes.includes(savedTheme as Theme)) setTheme(savedTheme as Theme);
+      if (savedLanguage === "uk" || savedLanguage === "en") setLanguage(savedLanguage);
 
       // Restore view from URL
       const fromPath = PATH_TO_VIEW[window.location.pathname];
@@ -100,6 +104,15 @@ export default function Page() {
       sessionStorage.setItem("oserver_user", JSON.stringify(user));
       sessionStorage.setItem("oserver_token", tok);
     } catch {}
+    // Load theme and language from DB
+    fetch(`${API}/account/settings`, {
+      headers: { Authorization: `Bearer ${tok}` },
+    }).then(r => r.ok ? r.json() : null).then(d => {
+      if (!d) return;
+      const validThemes: Theme[] = ["dark","light","void","lakers","electric","forest","neon","void-light","lakers-light","electric-light","forest-light","neon-light"];
+      if (validThemes.includes(d.theme)) { setTheme(d.theme); try { sessionStorage.setItem("oserver_theme", d.theme); } catch {} }
+      if (d.language === "uk" || d.language === "en") { setLanguage(d.language); try { sessionStorage.setItem("oserver_language", d.language); } catch {} }
+    }).catch(() => {});
   }
 
   function handleLogout() {
@@ -128,6 +141,11 @@ export default function Page() {
     try { sessionStorage.setItem("oserver_theme", newTheme); } catch {}
   }
 
+  function handleLanguageChange(newLanguage: Language) {
+    setLanguage(newLanguage);
+    try { sessionStorage.setItem("oserver_language", newLanguage); } catch {}
+  }
+
   if (!sessionLoaded) return null;
 
   if (!authUser) {
@@ -138,15 +156,15 @@ export default function Page() {
   }
 
   if (view === "groups") {
-    return <GroupsPanel token={token} authUser={authUser} t={t} onClose={() => navigate(config ? "file-manager" : "picker")} />;
+    return <GroupsPanel token={token} authUser={authUser} t={t} language={language} onLanguageChange={handleLanguageChange} onClose={() => navigate(config ? "file-manager" : "picker")} />;
   }
 
   if (view === "account") {
-    return <AccountSettings token={token} authUser={authUser} t={t} onClose={() => navigate(config ? "file-manager" : "picker")} onThemeChange={handleThemeChange} />;
+    return <AccountSettings token={token} authUser={authUser} t={t} onClose={() => navigate(config ? "file-manager" : "picker")} onThemeChange={handleThemeChange} onLanguageChange={handleLanguageChange} />;
   }
 
   if (view === "admin") {
-    return <AdminPanel token={token} t={t} onClose={() => navigate(config ? "file-manager" : "picker")} />;
+    return <AdminPanel token={token} t={t} language={language} onLanguageChange={handleLanguageChange} onClose={() => navigate(config ? "file-manager" : "picker")} />;
   }
 
   if (view === "file-manager" && config) {
@@ -156,7 +174,9 @@ export default function Page() {
         token={token}
         config={config}
         theme={theme}
+        language={language}
         onThemeChange={handleThemeChange}
+        onLanguageChange={handleLanguageChange}
         onAdminClick={() => navigate("admin")}
         onGroupsClick={() => navigate("groups")}
         onAccountClick={() => navigate("account")}
@@ -172,6 +192,8 @@ export default function Page() {
       authUser={authUser}
       onConnect={handleConnect}
       t={t}
+      language={language}
+      onLanguageChange={handleLanguageChange}
       onGroupsClick={() => navigate("groups")}
       onAccountClick={() => navigate("account")}
       onAdminClick={authUser.role === "admin" ? () => navigate("admin") : undefined}

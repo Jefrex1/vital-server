@@ -20,13 +20,16 @@ import { FileIcon } from "./ui/FileIcon";
 import { Terminal } from "./Terminal";
 import { RichPreview } from "./RichPreview";
 import { IconUsers, IconSettings, IconFolder, IconFile, IconX, IconCheck, IconArrowLeft, IconShare } from "./ui/Icons";
+import { I18N, Language } from "@/i18n";
 
 interface FileManagerProps {
   authUser: AuthUser;
   token: string;
   config: SSHConfig;
   theme: Theme;
+  language: Language;
   onThemeChange: (theme: Theme) => void;
+  onLanguageChange: (language: Language) => void;
   onAdminClick: () => void;
   onGroupsClick: () => void;
   onAccountClick: () => void;
@@ -39,14 +42,17 @@ export function FileManager({
   token,
   config,
   theme,
+  language,
   onThemeChange,
+  onLanguageChange,
   onAdminClick,
   onGroupsClick,
   onAccountClick,
   onLogout,
   onDisconnect,
 }: FileManagerProps) {
-  const t = THEMES[theme];
+  const t = (THEMES as Record<string, typeof THEMES.dark>)[theme] ?? THEMES.dark;
+  const l = I18N[language];
   const winW = useWindowWidth();
   const isMobile = winW < 600;
   const isNarrow = winW < 900;
@@ -592,7 +598,7 @@ export function FileManager({
 
   function startCreate(type: "dir" | "file") {
     setNewItem({ type });
-    setNewItemName(type === "dir" ? "Нова папка" : "новий_файл.txt");
+    setNewItemName(type === "dir" ? l.newFolder : "new_file.txt");
     setTimeout(() => {
       newItemInputRef.current?.focus();
       newItemInputRef.current?.select();
@@ -610,11 +616,11 @@ export function FileManager({
       } else {
         await api("/files/write", { path: joinPath(currentPath, name), content: "" });
       }
-      notify("Створено ✓");
+      notify("✓");
       loadDir(currentPath);
       if (newItem?.type === "dir") loadTree(homeDir);
     } catch (e: any) {
-      notify("Помилка: " + e.message);
+      notify(l.notifyError + e.message);
     }
   }
 
@@ -653,15 +659,15 @@ export function FileManager({
       const data = await res.json();
       if (res.ok) {
         if (data.warnings?.length) {
-          notify(`Поділились (є попередження для деяких юзерів)`);
+          notify(`${l.share} ✓`);
         } else {
-          notify(`Symlink створено для ${data.linked} учасників ✓`);
+          notify(`✓ ${data.linked}`);
         }
       } else {
-        notify("Помилка: " + data.error);
+        notify(l.notifyError + data.error);
       }
     } catch (e: any) {
-      notify("Помилка: " + e.message);
+      notify(l.notifyError + e.message);
     } finally {
       setShareLoading(false);
       setShareModal(null);
@@ -704,7 +710,7 @@ export function FileManager({
       }
     });
 
-    const result: JSX.Element[] = [];
+    const result: React.ReactElement[] = [];
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -1068,6 +1074,8 @@ export function FileManager({
               )}
             </button>
 
+
+
             {/* Admin */}
             {authUser.role === "admin" && (
               <button
@@ -1099,7 +1107,7 @@ export function FileManager({
               onClick={onGroupsClick}
               style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 11px", fontSize: isMobile ? 11 : 12, color: t.textMid, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
             >
-              <IconUsers size={13} color="currentColor" />{!isMobile && " Групи"}
+              {!isMobile && <IconUsers size={13} color="currentColor" />}{!isMobile && ` ${l.groupsBtn}`}
             </button>
 
             {/* Account */}
@@ -1108,7 +1116,7 @@ export function FileManager({
               onClick={onAccountClick}
               style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 11px", fontSize: isMobile ? 11 : 12, color: t.textMid, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
             >
-              <IconSettings size={13} color="currentColor" />{!isMobile && " Акаунт"}
+              <IconSettings size={13} color="currentColor" />{!isMobile && ` ${l.account}`}
             </button>
 
             {/* Terminal */}
@@ -1675,7 +1683,7 @@ export function FileManager({
                     letterSpacing: "0.02em",
                   }}
                 >
-                  + Створити ▾
+                  {`+ ${l.create} ▾`}
                 </button>
                 {createMenuOpen && (
                   <div
@@ -1694,8 +1702,8 @@ export function FileManager({
                     onMouseLeave={() => setCreateMenuOpen(false)}
                   >
                     {[
-                      { label: "Нова папка", icon: "dir" as const, type: "dir" as const },
-                      { label: "Новий файл", icon: "file" as const, type: "file" as const },
+                      { label: l.newFolder, icon: "dir" as const, type: "dir" as const },
+                      { label: l.newFile, icon: "file" as const, type: "file" as const },
                     ].map(({ label, icon, type }) => (
                       <div
                         key={type}
@@ -1735,9 +1743,7 @@ export function FileManager({
                     fontFamily: "inherit",
                     letterSpacing: "0.02em",
                   }}
-                >
-                  Поділитись
-                </button>
+                >{l.share}</button>
               )}
 
               {selectedNames.size > 0 && (
@@ -2002,32 +2008,32 @@ export function FileManager({
         {shareModal && (
           <div style={{ position: "fixed", inset: 0, background: "#0008", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ background: t.bg2, border: `1px solid ${t.border2}`, borderRadius: 8, padding: "24px 28px", width: "min(400px, 92vw)", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ fontSize: 14, color: t.text, fontWeight: 600 }}>Поділитись з групою</div>
+              <div style={{ fontSize: 14, color: t.text, fontWeight: 600 }}>{l.shareWithGroup}</div>
               <div style={{ fontSize: 12, color: t.textDim, display: "flex", alignItems: "center", gap: 6 }}>
                 <IconFile size={12} color="currentColor" /> {shareModal.name}
               </div>
               <div>
-                <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 6 }}>Виберіть групу</label>
+                <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 6 }}>{l.selectGroup}</label>
                 <select
                   value={shareGroupId ?? ""}
                   onChange={e => setShareGroupId(Number(e.target.value) || null)}
                   style={{ width: "100%", background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", fontSize: 12, color: t.text, fontFamily: "inherit" }}
                 >
-                  <option value="">— оберіть групу —</option>
+                  <option value="">{l.selectGroupPlaceholder}</option>
                   {userGroups.map(g => (
                     <option key={g.id} value={g.id}>{g.name}</option>
                   ))}
                 </select>
               </div>
               <div style={{ fontSize: 11, color: t.textDim, background: t.bg3, borderRadius: 4, padding: "8px 10px" }}>
-                Створить <strong>symlink</strong> у домашній папці кожного учасника групи — всі бачать і редагують один і той самий файл/папку.
+                {l.shareHint}
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button onClick={() => setShareModal(null)} style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 16px", fontSize: 12, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
-                  Скасувати
+                  {l.cancel}
                 </button>
                 <button onClick={shareWithGroup} disabled={!shareGroupId || shareLoading} style={{ background: t.accent, border: "none", borderRadius: 4, padding: "7px 16px", fontSize: 12, color: "#fff", cursor: shareGroupId && !shareLoading ? "pointer" : "not-allowed", fontFamily: "inherit", opacity: shareGroupId && !shareLoading ? 1 : 0.5 }}>
-                  {shareLoading ? "Застосування..." : "Поділитись"}
+                  {shareLoading ? "..." : l.share}
                 </button>
               </div>
             </div>

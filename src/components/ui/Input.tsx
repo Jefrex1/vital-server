@@ -6,8 +6,7 @@ import { THEMES } from "@/constants/themes";
 interface InputProps {
   label?: string;
   value: string;
-  // підтримує обидва формати: (v: string) => void  і  React.ChangeEventHandler
-  onChange: ((v: string) => void) | ((e: React.ChangeEvent<HTMLInputElement>) => void);
+  onChange: (v: string) => void;
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
   type?: string;
   placeholder?: string;
@@ -28,9 +27,8 @@ export function Input({ label, value, onChange, onKeyDown, type = "text", placeh
     boxSizing: "border-box",
   };
 
-  // Detect which signature by calling with a dummy check — safest is to always pass string
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    (onChange as any)(e.target.value);
+    onChange(e.target.value);
   }
 
   const input = (

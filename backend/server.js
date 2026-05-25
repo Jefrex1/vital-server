@@ -38,6 +38,7 @@ db.exec(`
     email       TEXT,
     bio         TEXT,
     theme       TEXT    NOT NULL DEFAULT 'dark',
+    language    TEXT    NOT NULL DEFAULT 'uk',
     updated_at  INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -83,6 +84,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS group_configs (
     group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     config_id   INTEGER NOT NULL REFERENCES ssh_configs(id) ON DELETE CASCADE,
+    access_role TEXT    NOT NULL DEFAULT 'operator',
     PRIMARY KEY (group_id, config_id)
   );
 
@@ -171,6 +173,24 @@ try {
   }
 } catch(e) { console.error('[oServer] Migration error (root_path):', e.message); }
 
+// Migration: add per-server access role to group_configs if missing
+try {
+  const gcCols = db.prepare('PRAGMA table_info(group_configs)').all().map(c => c.name);
+  if (!gcCols.includes('access_role')) {
+    db.exec("ALTER TABLE group_configs ADD COLUMN access_role TEXT NOT NULL DEFAULT 'operator'");
+    console.log('[oServer] Migrated: added access_role to group_configs');
+  }
+} catch(e) { console.error('[oServer] Migration error (group_configs.access_role):', e.message); }
+
+// Migration: add language to user_settings if missing
+try {
+  const usCols = db.prepare('PRAGMA table_info(user_settings)').all().map(c => c.name);
+  if (!usCols.includes('language')) {
+    db.exec("ALTER TABLE user_settings ADD COLUMN language TEXT NOT NULL DEFAULT 'uk'");
+    console.log('[oServer] Migrated: added language to user_settings');
+  }
+} catch(e) { console.error('[oServer] Migration error (user_settings.language):', e.message); }
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function auditLog(userId, username, action, target, detail, ip) {
   try {
@@ -202,6 +222,20 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
+function roleToPerms(role) {
+  if (role === 'admin') {
+    return { can_read: 1, can_write: 1, can_delete: 1, can_terminal: 1, can_upload: 1 };
+  }
+  if (role === 'operator') {
+    return { can_read: 1, can_write: 1, can_delete: 0, can_terminal: 1, can_upload: 1 };
+  }
+  return { can_read: 1, can_write: 0, can_delete: 0, can_terminal: 0, can_upload: 0 };
+}
+
+function normalizeAccessRole(role) {
+  return ['admin', 'operator', 'observer'].includes(role) ? role : 'operator';
+}
+
 // Check effective permissions for a user on a config
 function getEffectivePerms(userId, configId) {
   const user = db.prepare('SELECT role FROM users WHERE id = ?').get(userId);
@@ -219,7 +253,13 @@ function getEffectivePerms(userId, configId) {
     WHERE p.target_type = 'group' AND gm.user_id = ? AND (p.config_id = ? OR p.config_id IS NULL)
   `).all(userId, configId);
 
-  const allPerms = [...(userPerm ? [userPerm] : []), ...groupPerms];
+  const groupConfigRoles = db.prepare(`
+    SELECT gc.access_role FROM group_configs gc
+    JOIN group_members gm ON gm.group_id = gc.group_id
+    WHERE gm.user_id = ? AND gc.config_id = ?
+  `).all(userId, configId).map(r => roleToPerms(r.access_role));
+
+  const allPerms = [...(userPerm ? [userPerm] : []), ...groupPerms, ...groupConfigRoles];
   if (allPerms.length === 0) return null;
 
   return {
@@ -309,6 +349,205 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
+
+
+// ─── Swagger ──────────────────────────────────────────────────────────────────
+const swaggerUi = require('swagger-ui-express');
+
+const swaggerSpec = {
+  openapi: '3.0.0',
+  info: { title: 'oServer API', version: '1.0.0', description: 'SSH File Manager & Terminal API' },
+  servers: [{ url: `http://localhost:${process.env.PORT || 3001}` }],
+  components: {
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }
+    },
+    schemas: {
+      Error: { type: 'object', properties: { error: { type: 'string' } } },
+      Ok:    { type: 'object', properties: { ok:    { type: 'boolean' } } },
+    }
+  },
+  security: [{ bearerAuth: [] }],
+  paths: {
+    '/auth/login': {
+      post: {
+        tags: ['Auth'], summary: 'Login', security: [],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['username','password'], properties: { username: { type: 'string' }, password: { type: 'string' } } } } } },
+        responses: { 200: { description: 'JWT token + user info' }, 401: { description: 'Invalid credentials' } }
+      }
+    },
+    '/auth/register/public': {
+      post: {
+        tags: ['Auth'], summary: 'Public registration', security: [],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['username','password'], properties: { username: { type: 'string' }, password: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Created user + token' }, 409: { description: 'Username taken' } }
+      }
+    },
+    '/auth/register': {
+      post: {
+        tags: ['Auth'], summary: 'Create user (admin only)',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['username','password'], properties: { username: { type: 'string' }, password: { type: 'string' }, role: { type: 'string', enum: ['user','admin'] } } } } } },
+        responses: { 200: { description: 'Created' }, 403: { description: 'Forbidden' } }
+      }
+    },
+    '/auth/me': { get: { tags: ['Auth'], summary: 'Current user info', responses: { 200: { description: 'User object' } } } },
+    '/users': { get: { tags: ['Users'], summary: 'List all users (admin)', responses: { 200: { description: 'Array of users' } } } },
+    '/users/{id}': {
+      patch: {
+        tags: ['Users'], summary: 'Update user (admin)',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { password: { type: 'string' }, role: { type: 'string', enum: ['user','admin'] } } } } } },
+        responses: { 200: { description: 'Updated' } }
+      },
+      delete: {
+        tags: ['Users'], summary: 'Delete user (admin)',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        responses: { 200: { description: 'Deleted' } }
+      }
+    },
+    '/account/settings': {
+      get: { tags: ['Account'], summary: 'Get account settings', responses: { 200: { description: 'Settings including theme and language' } } },
+      patch: {
+        tags: ['Account'], summary: 'Update account settings',
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { display_name: { type: 'string' }, email: { type: 'string' }, bio: { type: 'string' }, theme: { type: 'string' }, language: { type: 'string', enum: ['uk','en'] } } } } } },
+        responses: { 200: { description: 'Saved' } }
+      }
+    },
+    '/account/password': {
+      patch: {
+        tags: ['Account'], summary: 'Change password',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['current_password','new_password'], properties: { current_password: { type: 'string' }, new_password: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Changed' }, 401: { description: 'Wrong current password' } }
+      }
+    },
+    '/configs': {
+      get: { tags: ['Configs'], summary: 'List SSH configs for current user', responses: { 200: { description: 'Array of configs' } } },
+      post: {
+        tags: ['Configs'], summary: 'Create SSH config',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['label','host','username'], properties: { label: { type: 'string' }, host: { type: 'string' }, port: { type: 'integer', default: 22 }, username: { type: 'string' }, password: { type: 'string' }, ssh_key: { type: 'string' }, auth_type: { type: 'string', enum: ['password','key'] } } } } } },
+        responses: { 200: { description: 'Created config id' } }
+      }
+    },
+    '/configs/{id}': {
+      delete: {
+        tags: ['Configs'], summary: 'Delete SSH config',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        responses: { 200: { description: 'Deleted' }, 403: { description: 'Forbidden' } }
+      }
+    },
+    '/groups': {
+      get: { tags: ['Groups'], summary: 'List groups with members and configs', responses: { 200: { description: 'Array of groups' } } },
+      post: {
+        tags: ['Groups'], summary: 'Create group',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, description: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Created' } }
+      }
+    },
+    '/groups/{id}': {
+      delete: {
+        tags: ['Groups'], summary: 'Delete group',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        responses: { 200: { description: 'Deleted' } }
+      }
+    },
+    '/groups/{id}/members': {
+      post: {
+        tags: ['Groups'], summary: 'Add member to group',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['user_id'], properties: { user_id: { type: 'integer' }, group_role: { type: 'string', enum: ['owner','moderator','member'] } } } } } },
+        responses: { 200: { description: 'Added' } }
+      }
+    },
+    '/groups/{id}/members/{uid}': {
+      delete: {
+        tags: ['Groups'], summary: 'Remove member from group',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }, { in: 'path', name: 'uid', required: true, schema: { type: 'integer' } }],
+        responses: { 200: { description: 'Removed' } }
+      }
+    },
+    '/groups/{id}/configs': {
+      post: {
+        tags: ['Groups'], summary: 'Add server to group with access role',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['config_id'], properties: { config_id: { type: 'integer' }, access_role: { type: 'string', enum: ['admin','operator','observer'], default: 'operator' } } } } } },
+        responses: { 200: { description: 'Added' } }
+      }
+    },
+    '/groups/{id}/configs/{cid}': {
+      delete: {
+        tags: ['Groups'], summary: 'Remove server from group',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }, { in: 'path', name: 'cid', required: true, schema: { type: 'integer' } }],
+        responses: { 200: { description: 'Removed' } }
+      }
+    },
+    '/groups/{id}/invite': {
+      post: {
+        tags: ['Groups'], summary: 'Invite user to group',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { username: { type: 'string' }, user_id: { type: 'integer' } } } } } },
+        responses: { 200: { description: 'Invite sent' } }
+      }
+    },
+    '/groups/{id}/provision': {
+      post: {
+        tags: ['Groups'], summary: 'Provision Linux user for group on SSH server',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { provision_config_id: { type: 'integer' }, provision_root_path: { type: 'string' }, sudo_password: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Provisioned' }, 500: { description: 'SSH error' } }
+      }
+    },
+    '/invites': { get: { tags: ['Invites'], summary: 'Get pending invites for current user', responses: { 200: { description: 'Array of invites' } } } },
+    '/invites/{id}': {
+      patch: {
+        tags: ['Invites'], summary: 'Accept or decline invite',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['accept','decline'] } } } } } },
+        responses: { 200: { description: 'Processed' } }
+      }
+    },
+    '/permissions': {
+      get: { tags: ['Permissions'], summary: 'List all permissions (admin)', responses: { 200: { description: 'Array' } } },
+      post: {
+        tags: ['Permissions'], summary: 'Create permission (admin)',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['target_type','target_id'], properties: { target_type: { type: 'string', enum: ['user','group'] }, target_id: { type: 'integer' }, config_id: { type: 'integer' }, can_read: { type: 'boolean' }, can_write: { type: 'boolean' }, can_delete: { type: 'boolean' }, can_terminal: { type: 'boolean' }, can_upload: { type: 'boolean' }, root_path: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Created' } }
+      }
+    },
+    '/permissions/{id}': {
+      delete: {
+        tags: ['Permissions'], summary: 'Delete permission (admin)',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        responses: { 200: { description: 'Deleted' } }
+      }
+    },
+    '/audit': {
+      get: {
+        tags: ['Audit'], summary: 'Audit log (admin)',
+        parameters: [{ in: 'query', name: 'limit', schema: { type: 'integer', default: 100 } }, { in: 'query', name: 'offset', schema: { type: 'integer', default: 0 } }],
+        responses: { 200: { description: 'rows + total' } }
+      }
+    },
+    '/run': {
+      post: {
+        tags: ['SSH'], summary: 'Run command on SSH server',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['command'], properties: { configId: { type: 'integer' }, command: { type: 'string' } } } } } },
+        responses: { 200: { description: 'stdout + stderr' } }
+      }
+    },
+    '/files/list': { post: { tags: ['Files'], summary: 'List files in directory', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { configId: { type: 'integer' }, path: { type: 'string' } } } } } }, responses: { 200: { description: 'items array' } } } },
+    '/files/read': { post: { tags: ['Files'], summary: 'Read file content', requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['path'], properties: { configId: { type: 'integer' }, path: { type: 'string' } } } } } }, responses: { 200: { description: 'content string' } } } },
+    '/files/write': { post: { tags: ['Files'], summary: 'Write file content', requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['path','content'], properties: { configId: { type: 'integer' }, path: { type: 'string' }, content: { type: 'string' } } } } } }, responses: { 200: { description: 'ok' } } } },
+    '/files/delete': { post: { tags: ['Files'], summary: 'Delete file or directory', requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['path'], properties: { configId: { type: 'integer' }, path: { type: 'string' } } } } } }, responses: { 200: { description: 'ok' } } } },
+    '/files/rename': { post: { tags: ['Files'], summary: 'Rename / move file', requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['from','to'], properties: { configId: { type: 'integer' }, from: { type: 'string' }, to: { type: 'string' } } } } } }, responses: { 200: { description: 'ok' } } } },
+    '/files/mkdir': { post: { tags: ['Files'], summary: 'Create directory', requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['path'], properties: { configId: { type: 'integer' }, path: { type: 'string' } } } } } }, responses: { 200: { description: 'ok' } } } },
+    '/files/download': { get: { tags: ['Files'], summary: 'Download file (GET with token)', parameters: [{ in: 'query', name: 'token', required: true, schema: { type: 'string' } }, { in: 'query', name: 'configId', schema: { type: 'integer' } }, { in: 'query', name: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'File stream' } } } },
+    '/files/upload': { post: { tags: ['Files'], summary: 'Upload file (multipart)', requestBody: { content: { 'multipart/form-data': { schema: { type: 'object', required: ['file','path'], properties: { configId: { type: 'integer' }, path: { type: 'string' }, file: { type: 'string', format: 'binary' } } } } } }, responses: { 200: { description: 'ok + path' } } } },
+    '/files/tree': { post: { tags: ['Files'], summary: 'Get directory tree', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { configId: { type: 'integer' }, path: { type: 'string' }, depth: { type: 'integer', default: 2 } } } } } }, responses: { 200: { description: 'dirs array' } } } },
+  }
+};
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -422,7 +661,7 @@ app.get('/groups', authMiddleware, (req, res) => {
       JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ?
     `).all(g.id),
     configs: db.prepare(`
-      SELECT sc.id, sc.label, sc.host, sc.port, sc.username, sc.auth_type FROM group_configs gc
+      SELECT sc.id, sc.label, sc.host, sc.port, sc.username, sc.auth_type, gc.access_role FROM group_configs gc
       JOIN ssh_configs sc ON sc.id = gc.config_id WHERE gc.group_id = ?
     `).all(g.id),
   }));
@@ -567,7 +806,7 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
         'INSERT INTO ssh_configs (owner_id, group_id, label, host, port, username, ssh_key, auth_type) VALUES (?,?,?,?,?,?,?,?)'
       ).run(null, group.id, `[Group] ${group.name}`, cfgRow.host, cfgRow.port, linuxUser, privKey.trim(), 'key');
       groupCfgId = r.lastInsertRowid;
-      db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(group.id, groupCfgId);
+      db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id, access_role) VALUES (?,?,?)').run(group.id, groupCfgId, 'admin');
       db.prepare(
         'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload, root_path) VALUES (?,?,?,1,1,1,1,1,?)'
       ).run('group', group.id, groupCfgId, rootPath);
@@ -576,7 +815,8 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
       db.prepare(
         `UPDATE ssh_configs SET ssh_key=?, host=?, port=?, username=?, auth_type='key' WHERE id=?`
       ).run(privKey.trim(), cfgRow.host, cfgRow.port, linuxUser, groupCfgId);
-      db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(group.id, groupCfgId);
+      db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id, access_role) VALUES (?,?,?)').run(group.id, groupCfgId, 'admin');
+      db.prepare('UPDATE group_configs SET access_role=? WHERE group_id=? AND config_id=?').run('admin', group.id, groupCfgId);
       db.prepare(
         `UPDATE permissions SET root_path=? WHERE target_type='group' AND target_id=? AND config_id=?`
       ).run(rootPath, group.id, groupCfgId);
@@ -756,21 +996,30 @@ app.post('/groups/:id/configs', authMiddleware, (req, res) => {
     return res.status(403).json({ error: 'Only group owner or admin can add servers' });
 
   const { config_id } = req.body;
+  const accessRole = normalizeAccessRole(req.body.access_role);
   if (!config_id) return res.status(400).json({ error: 'config_id required' });
   try {
-    db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id) VALUES (?,?)').run(req.params.id, config_id);
+    db.prepare('INSERT OR IGNORE INTO group_configs (group_id, config_id, access_role) VALUES (?,?,?)').run(req.params.id, config_id, accessRole);
+    db.prepare('UPDATE group_configs SET access_role=? WHERE group_id=? AND config_id=?').run(accessRole, req.params.id, config_id);
 
-    // Also auto-create a read permission for this group on this config if not exists
+    const rolePerms = roleToPerms(accessRole);
+    // Also auto-create or update permission for this group on this config.
     const exists = db.prepare(
       "SELECT id FROM permissions WHERE target_type='group' AND target_id=? AND config_id=?"
     ).get(req.params.id, config_id);
     if (!exists) {
       db.prepare(
-        'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload) VALUES (?,?,?,1,0,0,1,0)'
-      ).run('group', req.params.id, config_id);
+        'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload) VALUES (?,?,?,?,?,?,?,?)'
+      ).run('group', req.params.id, config_id, rolePerms.can_read, rolePerms.can_write, rolePerms.can_delete, rolePerms.can_terminal, rolePerms.can_upload);
+    } else {
+      db.prepare(`
+        UPDATE permissions
+        SET can_read=?, can_write=?, can_delete=?, can_terminal=?, can_upload=?
+        WHERE id=?
+      `).run(rolePerms.can_read, rolePerms.can_write, rolePerms.can_delete, rolePerms.can_terminal, rolePerms.can_upload, exists.id);
     }
 
-    auditLog(req.user.id, req.user.username, 'group_add_config', req.params.id, `config_id=${config_id}`, getClientIp(req));
+    auditLog(req.user.id, req.user.username, 'group_add_config', req.params.id, `config_id=${config_id}, role=${accessRole}`, getClientIp(req));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -841,18 +1090,19 @@ app.post('/groups/:id/share', authMiddleware, async (req, res) => {
 // ─── Account Settings ─────────────────────────────────────────────────────────
 app.get('/account/settings', authMiddleware, (req, res) => {
   const settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
-  res.json(settings || { user_id: req.user.id, display_name: null, email: null, bio: null, theme: 'dark' });
+  res.json(settings || { user_id: req.user.id, display_name: null, email: null, bio: null, theme: 'dark', language: 'uk' });
 });
 
 app.patch('/account/settings', authMiddleware, async (req, res) => {
-  const { display_name, email, bio, theme } = req.body;
+  const { display_name, email, bio, theme, language } = req.body;
+  const safeLanguage = ['uk', 'en'].includes(language) ? language : 'uk';
   const existing = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
   if (existing) {
-    db.prepare('UPDATE user_settings SET display_name=?, email=?, bio=?, theme=?, updated_at=unixepoch() WHERE user_id=?')
-      .run(display_name || null, email || null, bio || null, theme || 'dark', req.user.id);
+    db.prepare('UPDATE user_settings SET display_name=?, email=?, bio=?, theme=?, language=?, updated_at=unixepoch() WHERE user_id=?')
+      .run(display_name || null, email || null, bio || null, theme || 'dark', safeLanguage, req.user.id);
   } else {
-    db.prepare('INSERT INTO user_settings (user_id, display_name, email, bio, theme) VALUES (?,?,?,?,?)')
-      .run(req.user.id, display_name || null, email || null, bio || null, theme || 'dark');
+    db.prepare('INSERT INTO user_settings (user_id, display_name, email, bio, theme, language) VALUES (?,?,?,?,?,?)')
+      .run(req.user.id, display_name || null, email || null, bio || null, theme || 'dark', safeLanguage);
   }
   res.json({ ok: true });
 });
@@ -878,7 +1128,7 @@ app.get('/configs', authMiddleware, (req, res) => {
 
   // All users (including admin) see only their own configs + group-shared configs
   const rows = db.prepare(`
-    SELECT DISTINCT sc.*, g.provision_root_path FROM ssh_configs sc
+    SELECT DISTINCT sc.*, g.provision_root_path, gc.access_role FROM ssh_configs sc
     LEFT JOIN group_configs gc ON gc.config_id = sc.id
     LEFT JOIN group_members gm ON gm.group_id = gc.group_id AND gm.user_id = ?
     LEFT JOIN groups g ON g.id = gc.group_id
@@ -925,11 +1175,11 @@ app.get('/permissions', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 app.post('/permissions', authMiddleware, adminMiddleware, (req, res) => {
-  const { target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload } = req.body;
+  const { target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload, root_path } = req.body;
   if (!target_type || !target_id) return res.status(400).json({ error: 'target_type and target_id required' });
   const result = db.prepare(
-    'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload) VALUES (?,?,?,?,?,?,?,?)'
-  ).run(target_type, target_id, config_id || null, can_read ? 1 : 0, can_write ? 1 : 0, can_delete ? 1 : 0, can_terminal ? 1 : 0, can_upload ? 1 : 0);
+    'INSERT INTO permissions (target_type, target_id, config_id, can_read, can_write, can_delete, can_terminal, can_upload, root_path) VALUES (?,?,?,?,?,?,?,?,?)'
+  ).run(target_type, target_id, config_id || null, can_read ? 1 : 0, can_write ? 1 : 0, can_delete ? 1 : 0, can_terminal ? 1 : 0, can_upload ? 1 : 0, root_path || null);
   res.json({ id: result.lastInsertRowid });
 });
 

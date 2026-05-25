@@ -15,6 +15,7 @@ export interface SSHConfig {
   port: number;
   group_id?: number | null;
   provision_root_path?: string | null;
+  access_role?: AccessRole | null;
 }
 
 export interface FileItem {
@@ -65,7 +66,7 @@ export interface GroupRow {
   description: string | null;
   owner_id: number | null;
   members: { id: number; username: string; role: string; group_role: string }[];
-  configs: { id: number; label: string; host: string; port: number; username: string; auth_type: string }[];
+  configs: { id: number; label: string; host: string; port: number; username: string; auth_type: string; access_role?: AccessRole }[];
 }
 
 export interface GroupInvite {
@@ -97,7 +98,9 @@ export interface PermRow {
   can_delete: number;
   can_terminal: number;
   can_upload: number;
+  root_path?: string | null;
 }
 
+export type AccessRole = "admin" | "operator" | "observer";
 export type Theme = "dark" | "light" | "void" | "lakers" | "electric" | "forest" | "neon" | "void-light" | "lakers-light" | "electric-light" | "forest-light" | "neon-light";
 export type AdminTab = "users" | "groups" | "configs" | "permissions" | "audit";
