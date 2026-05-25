@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { AuthUser, UserSettings } from "@/types";
+import { AuthUser, UserSettings, Theme } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { Input } from "./ui/Input";
 
@@ -10,7 +10,7 @@ interface AccountSettingsProps {
   authUser: AuthUser;
   t: typeof THEMES.dark;
   onClose: () => void;
-  onThemeChange?: (theme: "dark" | "light") => void;
+  onThemeChange?: (theme: Theme) => void;
 }
 
 export function AccountSettings({ token, authUser, t, onClose, onThemeChange }: AccountSettingsProps) {
@@ -38,8 +38,8 @@ export function AccountSettings({ token, authUser, t, onClose, onThemeChange }: 
       });
       if (!res.ok) throw new Error((await res.json()).error);
       setMsg({ type: "ok", text: "Збережено!" });
-      if (onThemeChange && (settings.theme === "dark" || settings.theme === "light")) {
-        onThemeChange(settings.theme as "dark" | "light");
+      if (onThemeChange) {
+        onThemeChange(settings.theme as Theme);
       }
     } catch (e: any) { setMsg({ type: "err", text: e.message }); }
     finally { setSaving(false); }
@@ -106,12 +106,79 @@ export function AccountSettings({ token, authUser, t, onClose, onThemeChange }: 
                 style={{ width: "100%", background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "8px 10px", fontSize: 12, color: t.text, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
             </div>
             <div>
-              <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 4 }}>Тема</label>
-              <select value={settings.theme} onChange={e => setSettings(s => ({ ...s, theme: e.target.value }))}
-                style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", fontSize: 12, color: t.text, fontFamily: "inherit", width: "100%" }}>
-                <option value="dark">Темна</option>
-                <option value="light">Світла</option>
-              </select>
+              <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 8 }}>Тема</label>
+              {/* Base themes row */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 8 }}>
+                {([
+                  { key: "dark",  label: "Dark",  grad: "linear-gradient(135deg, #0a0a0a 0%, #1e1e1e 50%, #5a8ae0 100%)",  light: false },
+                  { key: "light", label: "Light", grad: "linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 50%, #2563eb 100%)",  light: true  },
+                ] as { key: string; label: string; grad: string; light: boolean }[]).map(({ key, label, grad, light }) => {
+                  const isSelected = settings.theme === key;
+                  return (
+                    <button key={key} onClick={() => setSettings(s => ({ ...s, theme: key }))} style={{
+                      position: "relative", background: grad,
+                      border: isSelected ? `2px solid ${light ? "#333" : "#fff"}` : "2px solid transparent",
+                      borderRadius: 8, height: 52, cursor: "pointer", padding: 0, overflow: "hidden",
+                      outline: isSelected ? `2px solid ${light ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.35)"}` : "none",
+                      outlineOffset: 2, transition: "transform 0.12s", transform: isSelected ? "scale(1.04)" : "scale(1)",
+                    }}>
+                      <span style={{ position: "absolute", bottom: 5, left: 0, right: 0, textAlign: "center", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: light ? "#222" : "#fff", textShadow: light ? "none" : "0 1px 3px rgba(0,0,0,0.9)", textTransform: "uppercase", fontFamily: "inherit" }}>{label}</span>
+                      {isSelected && <span style={{ position: "absolute", top: 4, right: 6, fontSize: 10, color: light ? "#222" : "#fff", lineHeight: 1 }}>✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Colored themes — dark + light pairs */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {([
+                  {
+                    name: "Void",
+                    dark:  { key: "void",         grad: "linear-gradient(135deg, #0d0010 0%, #1e0028 50%, #6800FF 100%)",        light: false },
+                    light: { key: "void-light",    grad: "linear-gradient(135deg, #fdf8ff 0%, #ebe0ff 55%, #6800FF 100%)",        light: true  },
+                  },
+                  {
+                    name: "Lakers",
+                    dark:  { key: "lakers",        grad: "linear-gradient(135deg, #0e0916 0%, #201430 40%, #552583 70%, #FDB927 100%)",   light: false },
+                    light: { key: "lakers-light",  grad: "linear-gradient(135deg, #fdf8ff 0%, #ede3ff 45%, #552583 78%, #FDB927 100%)",   light: true  },
+                  },
+                  {
+                    name: "Electric",
+                    dark:  { key: "electric",      grad: "linear-gradient(135deg, #00010f 0%, #00042a 50%, #0038FF 80%, #FFE500 100%)",   light: false },
+                    light: { key: "electric-light", grad: "linear-gradient(135deg, #f5f8ff 0%, #dce8ff 50%, #0038FF 80%, #FFE500 100%)",  light: true  },
+                  },
+                  {
+                    name: "Forest",
+                    dark:  { key: "forest",        grad: "linear-gradient(135deg, #060f09 0%, #13241b 50%, #1A3A2A 70%, #FF4500 100%)",  light: false },
+                    light: { key: "forest-light",  grad: "linear-gradient(135deg, #f4faf6 0%, #d8eedd 50%, #1A5C38 75%, #FF4500 100%)", light: true  },
+                  },
+                  {
+                    name: "Neon",
+                    dark:  { key: "neon",          grad: "linear-gradient(135deg, #0a0008 0%, #1c0020 50%, #FF007F 80%, #BAFF29 100%)",  light: false },
+                    light: { key: "neon-light",    grad: "linear-gradient(135deg, #fff5fa 0%, #ffd8ec 50%, #FF007F 78%, #BAFF29 100%)", light: true  },
+                  },
+                ] as { name: string; dark: { key: string; grad: string; light: boolean }; light: { key: string; grad: string; light: boolean } }[]).map(({ name, dark: dk, light: lk }) => (
+                  <div key={name}>
+                    <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>{name}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      {[dk, lk].map(({ key, grad, light }) => {
+                        const isSelected = settings.theme === key;
+                        return (
+                          <button key={key} onClick={() => setSettings(s => ({ ...s, theme: key }))} style={{
+                            position: "relative", background: grad,
+                            border: isSelected ? `2px solid ${light ? "#555" : "#fff"}` : "2px solid transparent",
+                            borderRadius: 7, height: 44, cursor: "pointer", padding: 0, overflow: "hidden",
+                            outline: isSelected ? `2px solid ${light ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.3)"}` : "none",
+                            outlineOffset: 2, transition: "transform 0.12s", transform: isSelected ? "scale(1.04)" : "scale(1)",
+                          }}>
+                            <span style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 8, fontWeight: 700, letterSpacing: "0.06em", color: light ? "#222" : "#fff", textShadow: light ? "none" : "0 1px 3px rgba(0,0,0,0.9)", textTransform: "uppercase", fontFamily: "inherit" }}>{light ? "Light" : "Dark"}</span>
+                            {isSelected && <span style={{ position: "absolute", top: 3, right: 5, fontSize: 9, color: light ? "#333" : "#fff", lineHeight: 1 }}>✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
             {msg && <div style={{ fontSize: 12, color: msg.type === "ok" ? t.green : t.red }}>{msg.text}</div>}
             <button onClick={saveProfile} disabled={saving}

@@ -39,7 +39,7 @@ export default function Page() {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [screen, setScreen] = useState<Screen>("login");
 
-  const t = THEMES[theme];
+  const t = (THEMES as Record<string, typeof THEMES.dark>)[theme] ?? THEMES.dark;
 
   // Navigate with URL update
   const navigate = useCallback((newView: AppView, replace = false) => {
@@ -79,7 +79,8 @@ export default function Page() {
         setToken(savedToken);
       }
       if (savedCfg) setConfig(JSON.parse(savedCfg));
-      if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
+      const validThemes: Theme[] = ["dark", "light", "void", "lakers", "electric", "forest", "neon", "void-light", "lakers-light", "electric-light", "forest-light", "neon-light"];
+      if (validThemes.includes(savedTheme as Theme)) setTheme(savedTheme as Theme);
 
       // Restore view from URL
       const fromPath = PATH_TO_VIEW[window.location.pathname];

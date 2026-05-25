@@ -6,7 +6,7 @@ import React, {
   useRef,
   useCallback,
 } from "react";
-import { AuthUser, SSHConfig, FileItem, Metrics, SidebarDir } from "@/types";
+import { AuthUser, SSHConfig, FileItem, Metrics, SidebarDir, Theme } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -24,8 +24,8 @@ interface FileManagerProps {
   authUser: AuthUser;
   token: string;
   config: SSHConfig;
-  theme: "dark" | "light";
-  onThemeChange: (theme: "dark" | "light") => void;
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
   onAdminClick: () => void;
   onGroupsClick: () => void;
   onAccountClick: () => void;
@@ -1004,8 +1004,8 @@ export function FileManager({
             {/* Theme */}
             <button
               onClick={() => {
-                const next: "dark" | "light" =
-                  theme === "dark" ? "light" : "dark";
+                const next: Theme =
+                  (theme === "dark" ? "light" : "dark") as Theme;
                 onThemeChange(next);
               }}
               style={{

@@ -99,5 +99,5 @@ export interface PermRow {
   can_upload: number;
 }
 
-export type Theme = "dark" | "light";
+export type Theme = "dark" | "light" | "void" | "lakers" | "electric" | "forest" | "neon" | "void-light" | "lakers-light" | "electric-light" | "forest-light" | "neon-light";
 export type AdminTab = "users" | "groups" | "configs" | "permissions" | "audit";
