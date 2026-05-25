@@ -5,6 +5,7 @@ import { AuthUser, GroupRow, GroupInvite, SSHConfig } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
+import { IconCrown, IconShield, IconUser, IconChevronUp, IconChevronDown, IconX, IconSettings, IconArrowLeft } from "./ui/Icons";
 
 interface GroupsPanelProps {
   token: string;
@@ -148,7 +149,11 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
     load();
   }
 
-  const ROLE_LABELS: Record<string, string> = { owner: "👑 власник", moderator: "🛡 модератор", member: "👤 учасник" };
+  const ROLE_LABELS: Record<string, React.ReactNode> = {
+    owner: <><IconCrown size={10} color="currentColor" /> власник</>,
+    moderator: <><IconShield size={10} color="currentColor" /> модератор</>,
+    member: <><IconUser size={10} color="currentColor" /> учасник</>,
+  };
   const ROLE_COLOR: Record<string, string> = { owner: t.red || "#e53935", moderator: "#7c4dff", member: t.textDim };
 
   const tabBtn = (id: typeof tab, label: string, badge?: number) => (
@@ -183,8 +188,8 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
           <button onClick={() => setShowCreate(true)} style={{ background: t.red, border: "none", borderRadius: 4, padding: "5px 12px", fontSize: 11, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
             + Нова група
           </button>
-          <button onClick={onClose} style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
-            ← Назад
+          <button onClick={onClose} style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
+            <IconArrowLeft size={11} color="currentColor" /> Назад
           </button>
         </div>
       </div>
@@ -229,7 +234,7 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                       {isOwner && (
                         <button onClick={e => { e.stopPropagation(); const provisioned = (g as any).provisioned_at; setProvisionModal({ groupId: g.id, groupName: g.name, provision_config_id: String((g as any).provision_config_id || ""), provision_root_path: (g as any).provision_root_path || "" }); setProvisionMsg(null); }}
                           style={{ background: (g as any).provisioned_at ? "transparent" : "transparent", border: `1px solid ${(g as any).provisioned_at ? t.border2 : t.border2}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: (g as any).provisioned_at ? (t.green || "#4caf50") : t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
-                          {(g as any).provisioned_at ? "⚙ Provisioned" : "⚙ Provision"}
+                          {(g as any).provisioned_at ? <><IconSettings size={11} color="currentColor" /> Provisioned</> : <><IconSettings size={11} color="currentColor" /> Provision</>}
                         </button>
                       )}
                       {isManager && (
@@ -256,7 +261,7 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                           Видалити
                         </button>
                       )}
-                      <span style={{ color: t.textDim, fontSize: 12 }}>{expanded ? "▲" : "▼"}</span>
+                      <span style={{ color: t.textDim, fontSize: 12 }}>{expanded ? <IconChevronUp size={12} color="currentColor" /> : <IconChevronDown size={12} color="currentColor" />}</span>
                     </div>
                   </div>
 
@@ -280,12 +285,12 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                                     value={m.group_role || "member"}
                                     onChange={e => changeMemberRole(g.id, m.id, e.target.value)}
                                     style={{ background: t.bg4, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textDim, fontSize: 10, padding: "2px 4px", fontFamily: "inherit", cursor: "pointer" }}>
-                                    <option value="owner">👑 власник</option>
-                                    <option value="moderator">🛡 модератор</option>
-                                    <option value="member">👤 учасник</option>
+                                    <option value="owner">власник</option>
+                                    <option value="moderator">модератор</option>
+                                    <option value="member">учасник</option>
                                   </select>
                                   <button onClick={() => removeMember(g.id, m.id)}
-                                    style={{ background: "transparent", border: "none", color: t.red, cursor: "pointer", fontSize: 14, padding: "0 4px" }}>✕</button>
+                                    style={{ background: "transparent", border: "none", color: t.red, cursor: "pointer", padding: "0 4px", display: "flex", alignItems: "center" }}><IconX size={13} color="currentColor" /></button>
                                 </div>
                               )}
                             </div>
@@ -306,7 +311,7 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
                               </div>
                               {isManager && (
                                 <button onClick={() => removeServerFromGroup(g.id, c.id)}
-                                  style={{ background: "transparent", border: "none", color: t.red, cursor: "pointer", fontSize: 14, padding: "0 4px" }}>✕</button>
+                                  style={{ background: "transparent", border: "none", color: t.red, cursor: "pointer", padding: "0 4px", display: "flex", alignItems: "center" }}><IconX size={13} color="currentColor" /></button>
                               )}
                             </div>
                           ))}

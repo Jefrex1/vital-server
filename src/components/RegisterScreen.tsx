@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { AuthUser } from "@/types";
 import { API } from "@/constants/themes";
+import { IconArrowRight, IconArrowLeft } from "./ui/Icons";
 
 interface RegisterScreenProps {
   onRegister: (user: AuthUser, token: string) => void;
@@ -150,7 +151,7 @@ export function RegisterScreen({ onRegister, onBackToLogin }: RegisterScreenProp
             letterSpacing: "0.04em",
           }}
         >
-          {loading ? "Creating account…" : "Create account →"}
+          {loading ? "Creating account…" : <><span>Create account</span><IconArrowRight size={11} color="currentColor" style={{marginLeft:6}} /></>}
         </button>
 
         <button
@@ -168,7 +169,7 @@ export function RegisterScreen({ onRegister, onBackToLogin }: RegisterScreenProp
           onMouseEnter={(e) => (e.currentTarget.style.color = "#888")}
           onMouseLeave={(e) => (e.currentTarget.style.color = "#555")}
         >
-          ← Back to sign in
+          <IconArrowLeft size={11} color="currentColor" style={{marginRight:6}} />Back to sign in
         </button>
       </div>
     </div>

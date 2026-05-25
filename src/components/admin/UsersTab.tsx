@@ -5,6 +5,7 @@ import { UserRow } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { Modal } from "../ui/Modal";
 import { Input } from "../ui/Input";
+import { IconX, IconChevronUp, IconChevronDown, IconArrowLeft, IconArrowRight, IconSettings, IconCheck } from "../ui/Icons";
 import { tsToStr } from "@/utils/helpers";
 
 interface UsersTabProps {
@@ -200,7 +201,7 @@ export function UsersTab({
                     (e.currentTarget.style.color = t.textDim)
                   }
                 >
-                  ✕
+                  <IconX size={13} color="currentColor" />
                 </button>
               )}
             </tr>

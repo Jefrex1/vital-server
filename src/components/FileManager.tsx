@@ -19,6 +19,7 @@ import { Sparkline } from "./ui/Sparkline";
 import { FileIcon } from "./ui/FileIcon";
 import { Terminal } from "./Terminal";
 import { RichPreview } from "./RichPreview";
+import { IconUsers, IconSettings, IconFolder, IconFile, IconX, IconCheck, IconArrowLeft, IconShare } from "./ui/Icons";
 
 interface FileManagerProps {
   authUser: AuthUser;
@@ -1098,7 +1099,7 @@ export function FileManager({
               onClick={onGroupsClick}
               style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 11px", fontSize: isMobile ? 11 : 12, color: t.textMid, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
             >
-              👥{!isMobile && " Групи"}
+              <IconUsers size={13} color="currentColor" />{!isMobile && " Групи"}
             </button>
 
             {/* Account */}
@@ -1107,7 +1108,7 @@ export function FileManager({
               onClick={onAccountClick}
               style={{ background: t.bg4, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 11px", fontSize: isMobile ? 11 : 12, color: t.textMid, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
             >
-              ⚙{!isMobile && " Акаунт"}
+              <IconSettings size={13} color="currentColor" />{!isMobile && " Акаунт"}
             </button>
 
             {/* Terminal */}
@@ -1602,7 +1603,7 @@ export function FileManager({
                 ...(view !== "files"
                   ? [
                       {
-                        label: "← Files",
+                        label: <><IconArrowLeft size={11} color="currentColor" style={{marginRight:5}} />Files</>,
                         onClick: () =>
                           setView("files"),
                         disabled: false,
@@ -1693,9 +1694,9 @@ export function FileManager({
                     onMouseLeave={() => setCreateMenuOpen(false)}
                   >
                     {[
-                      { label: "📁 Нова папка", type: "dir" as const },
-                      { label: "📄 Новий файл", type: "file" as const },
-                    ].map(({ label, type }) => (
+                      { label: "Нова папка", icon: "dir" as const, type: "dir" as const },
+                      { label: "Новий файл", icon: "file" as const, type: "file" as const },
+                    ].map(({ label, icon, type }) => (
                       <div
                         key={type}
                         onClick={() => { setCreateMenuOpen(false); startCreate(type); }}
@@ -1705,10 +1706,12 @@ export function FileManager({
                           color: t.text,
                           cursor: "pointer",
                           borderBottom: `1px solid ${t.border}`,
+                          display: "flex", alignItems: "center", gap: 8,
                         }}
                         onMouseEnter={e => (e.currentTarget.style.background = t.bg4)}
                         onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                       >
+                        {icon === "dir" ? <IconFolder size={13} color="currentColor" /> : <IconFile size={13} color="currentColor" />}
                         {label}
                       </div>
                     ))}
@@ -1940,7 +1943,7 @@ export function FileManager({
                           border: `1px solid ${t.accent}`,
                         }}
                       >
-                        <span style={{ fontSize: 32 }}>{newItem.type === "dir" ? "📁" : "📄"}</span>
+                        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, background: t.bg2, borderRadius: 6 }}>{newItem.type === "dir" ? <IconFolder size={20} color="currentColor" /> : <IconFile size={20} color="currentColor" />}</span>
                         <input
                           ref={newItemInputRef}
                           value={newItemName}
@@ -2000,8 +2003,8 @@ export function FileManager({
           <div style={{ position: "fixed", inset: 0, background: "#0008", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ background: t.bg2, border: `1px solid ${t.border2}`, borderRadius: 8, padding: "24px 28px", width: "min(400px, 92vw)", display: "flex", flexDirection: "column", gap: 16 }}>
               <div style={{ fontSize: 14, color: t.text, fontWeight: 600 }}>Поділитись з групою</div>
-              <div style={{ fontSize: 12, color: t.textDim }}>
-                📄 {shareModal.name}
+              <div style={{ fontSize: 12, color: t.textDim, display: "flex", alignItems: "center", gap: 6 }}>
+                <IconFile size={12} color="currentColor" /> {shareModal.name}
               </div>
               <div>
                 <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 6 }}>Виберіть групу</label>

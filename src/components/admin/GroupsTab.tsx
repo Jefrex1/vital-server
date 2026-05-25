@@ -5,6 +5,7 @@ import { GroupRow, UserRow, SSHConfig } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { Modal } from "../ui/Modal";
 import { Input } from "../ui/Input";
+import { IconX, IconChevronUp, IconChevronDown, IconArrowLeft, IconArrowRight, IconSettings, IconCheck } from "../ui/Icons";
 
 interface GroupsTabProps {
   token: string;
@@ -224,7 +225,7 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
                   onClick={() => setProvisionModal({ groupId: g.id, groupName: g.name, provision_config_id: String((g as any).provision_config_id || ""), provision_root_path: (g as any).provision_root_path || "" })}
                   style={{ background: (g as any).provisioned_at ? t.tagBg : t.accentBg, border: `1px solid ${(g as any).provisioned_at ? t.border : t.accentBorder}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: (g as any).provisioned_at ? t.green : t.accent, cursor: "pointer", fontFamily: "inherit" }}
                 >
-                  {(g as any).provisioned_at ? "⚙ Provisioned" : "⚙ Provision"}
+                  {(g as any).provisioned_at ? <><IconSettings size={11} color="currentColor" /> Provisioned</> : <><IconSettings size={11} color="currentColor" /> Provision</>}
                 </button>
                 <button
                   onClick={() => { setInviteModal({ groupId: g.id, groupName: g.name }); setInviteTarget(""); setInviteMsg(""); }}
@@ -238,7 +239,7 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
                   onMouseEnter={(e) => (e.currentTarget.style.color = t.red)}
                   onMouseLeave={(e) => (e.currentTarget.style.color = t.textDim)}
                 >
-                  ✕
+                  <IconX size={13} color="currentColor" />
                 </button>
               </div>
             </div>
@@ -258,9 +259,9 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
                     )}
                     <span
                       onClick={() => removeMember(g.id, m.id)}
-                      style={{ cursor: "pointer", opacity: 0.6, lineHeight: 1 }}
+                      style={{ cursor: "pointer", opacity: 0.6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
                     >
-                      ✕
+                      <IconX size={10} color="currentColor" />
                     </span>
                   </span>
                 ))}
@@ -313,9 +314,9 @@ export function GroupsTab({ token, t, onRefresh }: GroupsTabProps) {
                     </span>
                     <span
                       onClick={() => removeConfig(g.id, c.id)}
-                      style={{ cursor: "pointer", opacity: 0.6, lineHeight: 1 }}
+                      style={{ cursor: "pointer", opacity: 0.6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
                     >
-                      ✕
+                      <IconX size={10} color="currentColor" />
                     </span>
                   </span>
                 ))}

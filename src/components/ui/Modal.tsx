@@ -2,6 +2,7 @@
 
 import React from "react";
 import { THEMES } from "@/constants/themes";
+import { IconX } from "./Icons";
 
 interface ModalProps {
   title: string;
@@ -73,7 +74,7 @@ export function Modal({
               lineHeight: 1,
             }}
           >
-            ✕
+            <IconX size={14} color="currentColor" />
           </button>
         </div>
         {children}

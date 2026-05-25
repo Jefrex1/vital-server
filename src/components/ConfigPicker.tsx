@@ -5,6 +5,7 @@ import { SSHConfig, AuthUser, GroupInvite } from "@/types";
 import { API, THEMES } from "@/constants/themes";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
+import { IconUsers, IconSettings, IconShield2, IconKey, IconFolder, IconX } from "./ui/Icons";
 
 interface ConfigPickerProps {
   token: string;
@@ -139,17 +140,17 @@ export function ConfigPicker({
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button onClick={onGroupsClick}
             style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
-            👥 Групи
+            <IconUsers size={12} color="currentColor" /> Групи
             {pendingInvites > 0 && <span style={{ background: t.red, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 10 }}>{pendingInvites}</span>}
           </button>
           <button onClick={onAccountClick}
             style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
-            ⚙ Акаунт
+            <IconSettings size={12} color="currentColor" /> Акаунт
           </button>
           {onAdminClick && (
             <button onClick={onAdminClick}
               style={{ background: "transparent", border: `1px solid ${t.border2}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, color: t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
-              🛡 Адмін
+              <IconShield2 size={12} color="currentColor" /> Адмін
             </button>
           )}
           <button onClick={onLogout}
@@ -262,7 +263,7 @@ export function ConfigPicker({
                       fontFamily: "inherit",
                     }}
                   >
-                    {a === "password" ? "🔑 Password" : "🗝 SSH Key"}
+                    {a === "password" ? <><IconKey size={11} color="currentColor" /> Password</> : <><IconKey size={11} color="currentColor" /> SSH Key</>}
                   </button>
                 ))}
               </div>
@@ -413,9 +414,9 @@ export function ConfigPicker({
                 </div>
                 <div style={{ fontSize: 11, color: t.textDim }}>
                   {cfg.username}@{cfg.host}:{cfg.port} ·{" "}
-                  {cfg.auth_type === "key" ? "🗝 key" : "🔑 pw"}
+                  {cfg.auth_type === "key" ? <><IconKey size={11} color="currentColor" /> key</> : <><IconKey size={11} color="currentColor" /> pw</>}
                   {cfg.provision_root_path && (
-                    <span style={{ marginLeft: 6, opacity: 0.7 }}>📁 {cfg.provision_root_path}</span>
+                    <span style={{ marginLeft: 6, opacity: 0.7, display: "inline-flex", alignItems: "center", gap: 3 }}><IconFolder size={11} color="currentColor" /> {cfg.provision_root_path}</span>
                   )}
                 </div>
               </div>
@@ -433,7 +434,7 @@ export function ConfigPicker({
                   onMouseEnter={(e) => (e.currentTarget.style.color = t.red)}
                   onMouseLeave={(e) => (e.currentTarget.style.color = t.textDim)}
                 >
-                  ✕
+                  <IconX size={14} color="currentColor" />
                 </button>
               )}
             </div>

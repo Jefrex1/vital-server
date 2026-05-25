@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { AuthUser } from "@/types";
 import { API } from "@/constants/themes";
+import { IconArrowRight } from "./ui/Icons";
 
 interface LoginScreenProps {
   onLogin: (user: AuthUser, token: string) => void;
@@ -130,7 +131,7 @@ export function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
             letterSpacing: "0.04em",
           }}
         >
-          {loading ? "Signing in…" : "Sign in →"}
+          {loading ? "Signing in…" : <><span>Sign in</span><IconArrowRight size={11} color="currentColor" style={{marginLeft:6}} /></>}
         </button>
 
         <div
@@ -158,7 +159,7 @@ export function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
             onMouseEnter={(e) => (e.currentTarget.style.color = "#888")}
             onMouseLeave={(e) => (e.currentTarget.style.color = "#555")}
           >
-            Register →
+            <><span>Register</span><IconArrowRight size={11} color="currentColor" style={{marginLeft:6}} /></>
           </button>
         </div>
       </div>

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { AuditRow } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { tsToStr } from "@/utils/helpers";
+import { IconArrowLeft, IconArrowRight } from "../ui/Icons";
 
 interface AuditTabProps {
   token: string;
@@ -103,7 +104,7 @@ export function AuditTab({
               opacity: offset === 0 ? 0.4 : 1,
             }}
           >
-            ← Prev
+            <IconArrowLeft size={12} color="currentColor" style={{ marginRight: 4 }} /> Prev
           </button>
           <button
             disabled={offset + 50 >= audit.total}
@@ -122,7 +123,7 @@ export function AuditTab({
               opacity: offset + 50 >= audit.total ? 0.4 : 1,
             }}
           >
-            Next →
+            Next <IconArrowRight size={12} color="currentColor" style={{ marginLeft: 4 }} />
           </button>
         </div>
       </div>

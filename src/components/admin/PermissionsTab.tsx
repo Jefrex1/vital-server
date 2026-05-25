@@ -5,6 +5,7 @@ import { PermRow, UserRow, GroupRow, SSHConfig } from "@/types";
 import { THEMES, API } from "@/constants/themes";
 import { Modal } from "../ui/Modal";
 import { Input } from "../ui/Input";
+import { IconX, IconChevronUp, IconChevronDown, IconArrowLeft, IconArrowRight, IconSettings, IconCheck } from "../ui/Icons";
 
 interface PermissionsTabProps {
   token: string;
@@ -117,8 +118,8 @@ export function PermissionsTab({
   );
 
   const flag = (v: number) => (
-    <span style={{ color: v ? t.green : t.textDim }}>
-      {v ? "✓" : "—"}
+    <span style={{ color: v ? t.green : t.textDim, display: "inline-flex", alignItems: "center" }}>
+      {v ? <IconCheck size={12} color="currentColor" /> : "—"}
     </span>
   );
 
@@ -203,12 +204,7 @@ export function PermissionsTab({
                     (e.currentTarget.style.color = t.textDim)
                   }
                 >
-                  ✕
-                </button>
-              )}
-            </tr>
-          ))}
-        </tbody>
+                  <IconX size={13} color="currentColor" />
       </table>
 
       {showNewPerm && (
