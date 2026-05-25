@@ -448,7 +448,13 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
               </label>
               <select
                 value={provisionModal.provision_config_id}
-                onChange={e => setProvisionModal(m => m ? { ...m, provision_config_id: e.target.value } : m)}
+                onChange={e => {
+                  const cfgId = e.target.value;
+                  const cfg = myConfigs.find(c => String(c.id) === cfgId);
+                  // Автоматично підставляємо домашню папку юзера як дефолт
+                  const defaultPath = cfg ? `/home/${cfg.username}` : "";
+                  setProvisionModal(m => m ? { ...m, provision_config_id: cfgId, provision_root_path: m.provision_root_path || defaultPath } : m);
+                }}
                 style={{ background: t.bg2, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", color: t.text, fontFamily: "inherit", fontSize: 12, outline: "none" }}
               >
                 <option value="">— виберіть сервер —</option>
@@ -460,7 +466,7 @@ export function GroupsPanel({ token, authUser, t, onClose }: GroupsPanelProps) {
 
             <Input
               t={t}
-              placeholder="Директорія, напр. /home/jefrex/minecraft"
+              placeholder={(() => { const cfg = myConfigs.find(c => String(c.id) === provisionModal.provision_config_id); return cfg ? `/home/${cfg.username}` : "Директорія (дефолт: /home/<user>)"; })()}
               value={provisionModal.provision_root_path}
               onChange={v => setProvisionModal(m => m ? { ...m, provision_root_path: v } : m)}
             />

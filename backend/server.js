@@ -446,11 +446,32 @@ app.post('/groups', authMiddleware, (req, res) => {
   }
 });
 
-app.delete('/groups/:id', authMiddleware, (req, res) => {
+app.delete('/groups/:id', authMiddleware, async (req, res) => {
   const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!g) return res.status(404).json({ error: 'Not found' });
   if (req.user.role !== 'admin' && g.owner_id !== req.user.id)
     return res.status(403).json({ error: 'Only group owner or admin can delete' });
+
+  // Якщо група провізіонована — видаляємо Linux юзера з сервера
+  if (g.linux_user && g.provision_config_id) {
+    const cfgRow = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(g.provision_config_id);
+    if (cfgRow) {
+      try {
+        const conn = await sshConnect(normalizeConfig(cfgRow));
+        // userdel -r видаляє юзера і його домашню папку
+        await sshExec(conn, `sudo userdel -r ${g.linux_user} 2>/dev/null || true`);
+        // Також видаляємо Linux групу
+        await sshExec(conn, `sudo groupdel ${g.linux_user} 2>/dev/null || true`);
+        conn.end();
+      } catch (e) {
+        console.error('[delete_group] userdel failed:', e.message);
+      }
+    }
+  }
+
+  // Видаляємо груповий SSH конфіг зі списку серверів
+  db.prepare('DELETE FROM ssh_configs WHERE group_id = ?').run(req.params.id);
+
   db.prepare('DELETE FROM groups WHERE id = ?').run(req.params.id);
   auditLog(req.user.id, req.user.username, 'delete_group', g.name, null, getClientIp(req));
   res.json({ ok: true });
@@ -466,13 +487,14 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
     return res.status(403).json({ error: 'Only group owner or admin can provision' });
 
   const configId = req.body.provision_config_id || group.provision_config_id;
-  const rootPath = req.body.provision_root_path || group.provision_root_path;
 
   if (!configId) return res.status(400).json({ error: 'provision_config_id required' });
-  if (!rootPath) return res.status(400).json({ error: 'provision_root_path required' });
 
   const cfgRow = db.prepare('SELECT * FROM ssh_configs WHERE id = ?').get(configId);
   if (!cfgRow) return res.status(404).json({ error: 'SSH config not found' });
+
+  // Якщо шлях не вказано — використовуємо домашню папку юзера як дефолт
+  const rootPath = req.body.provision_root_path || group.provision_root_path || `/home/${cfgRow.username}`;
 
   if (req.user.role !== 'admin') {
     const hasAccess = cfgRow.owner_id === req.user.id || (cfgRow.group_id && db.prepare(
