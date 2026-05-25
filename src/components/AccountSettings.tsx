@@ -107,77 +107,40 @@ export function AccountSettings({ token, authUser, t, onClose, onThemeChange }: 
             </div>
             <div>
               <label style={{ fontSize: 11, color: t.textDim, display: "block", marginBottom: 8 }}>Тема</label>
-              {/* Base themes row */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 8 }}>
+              {/* All themes in one square-tile grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
                 {([
-                  { key: "dark",  label: "Dark",  grad: "linear-gradient(135deg, #0a0a0a 0%, #1e1e1e 50%, #5a8ae0 100%)",  light: false },
-                  { key: "light", label: "Light", grad: "linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 50%, #2563eb 100%)",  light: true  },
-                ] as { key: string; label: string; grad: string; light: boolean }[]).map(({ key, label, grad, light }) => {
+                  { key: "dark",          grad: "linear-gradient(135deg, #0a0a0a 0%, #1e1e1e 50%, #5a8ae0 100%)",                       light: false },
+                  { key: "light",         grad: "linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 50%, #2563eb 100%)",                       light: true  },
+                  { key: "void",          grad: "linear-gradient(135deg, #0d0010 0%, #1e0028 50%, #6800FF 100%)",                       light: false },
+                  { key: "void-light",    grad: "linear-gradient(135deg, #fdf8ff 0%, #ebe0ff 55%, #6800FF 100%)",                       light: true  },
+                  { key: "lakers",        grad: "linear-gradient(135deg, #0e0916 0%, #201430 40%, #552583 70%, #FDB927 100%)",           light: false },
+                  { key: "lakers-light",  grad: "linear-gradient(135deg, #fdf8ff 0%, #ede3ff 45%, #552583 78%, #FDB927 100%)",          light: true  },
+                  { key: "electric",      grad: "linear-gradient(135deg, #00010f 0%, #00042a 50%, #0038FF 80%, #FFE500 100%)",           light: false },
+                  { key: "electric-light",grad: "linear-gradient(135deg, #f5f8ff 0%, #dce8ff 50%, #0038FF 80%, #FFE500 100%)",          light: true  },
+                  { key: "forest",        grad: "linear-gradient(135deg, #060f09 0%, #13241b 50%, #1A3A2A 70%, #FF4500 100%)",          light: false },
+                  { key: "forest-light",  grad: "linear-gradient(135deg, #f4faf6 0%, #d8eedd 50%, #1A5C38 75%, #FF4500 100%)",         light: true  },
+                  { key: "neon",          grad: "linear-gradient(135deg, #0a0008 0%, #1c0020 50%, #FF007F 80%, #BAFF29 100%)",          light: false },
+                  { key: "neon-light",    grad: "linear-gradient(135deg, #fff5fa 0%, #ffd8ec 50%, #FF007F 78%, #BAFF29 100%)",         light: true  },
+                ] as { key: string; grad: string; light: boolean }[]).map(({ key, grad, light }) => {
                   const isSelected = settings.theme === key;
                   return (
                     <button key={key} onClick={() => setSettings(s => ({ ...s, theme: key }))} style={{
                       position: "relative", background: grad,
-                      border: isSelected ? `2px solid ${light ? "#333" : "#fff"}` : "2px solid transparent",
-                      borderRadius: 8, height: 52, cursor: "pointer", padding: 0, overflow: "hidden",
-                      outline: isSelected ? `2px solid ${light ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.35)"}` : "none",
-                      outlineOffset: 2, transition: "transform 0.12s", transform: isSelected ? "scale(1.04)" : "scale(1)",
+                      border: isSelected
+                        ? `2px solid ${light ? "#1a1a1a" : "#ffffff"}`
+                        : `2px solid ${light ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.08)"}`,
+                      borderRadius: 8, aspectRatio: "1", cursor: "pointer", padding: 0, overflow: "hidden",
+                      outline: "none",
+                      transition: "transform 0.12s, border-color 0.12s",
+                      transform: isSelected ? "scale(1.08)" : "scale(1)",
                     }}>
-                      <span style={{ position: "absolute", bottom: 5, left: 0, right: 0, textAlign: "center", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: light ? "#222" : "#fff", textShadow: light ? "none" : "0 1px 3px rgba(0,0,0,0.9)", textTransform: "uppercase", fontFamily: "inherit" }}>{label}</span>
-                      {isSelected && <span style={{ position: "absolute", top: 4, right: 6, fontSize: 10, color: light ? "#222" : "#fff", lineHeight: 1 }}>✓</span>}
+                      {isSelected && (
+                        <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", fontSize: 13, color: light ? "#1a1a1a" : "#ffffff", lineHeight: 1, textShadow: light ? "none" : "0 1px 4px rgba(0,0,0,0.8)" }}>✓</span>
+                      )}
                     </button>
                   );
                 })}
-              </div>
-              {/* Colored themes — dark + light pairs */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {([
-                  {
-                    name: "Void",
-                    dark:  { key: "void",         grad: "linear-gradient(135deg, #0d0010 0%, #1e0028 50%, #6800FF 100%)",        light: false },
-                    light: { key: "void-light",    grad: "linear-gradient(135deg, #fdf8ff 0%, #ebe0ff 55%, #6800FF 100%)",        light: true  },
-                  },
-                  {
-                    name: "Lakers",
-                    dark:  { key: "lakers",        grad: "linear-gradient(135deg, #0e0916 0%, #201430 40%, #552583 70%, #FDB927 100%)",   light: false },
-                    light: { key: "lakers-light",  grad: "linear-gradient(135deg, #fdf8ff 0%, #ede3ff 45%, #552583 78%, #FDB927 100%)",   light: true  },
-                  },
-                  {
-                    name: "Electric",
-                    dark:  { key: "electric",      grad: "linear-gradient(135deg, #00010f 0%, #00042a 50%, #0038FF 80%, #FFE500 100%)",   light: false },
-                    light: { key: "electric-light", grad: "linear-gradient(135deg, #f5f8ff 0%, #dce8ff 50%, #0038FF 80%, #FFE500 100%)",  light: true  },
-                  },
-                  {
-                    name: "Forest",
-                    dark:  { key: "forest",        grad: "linear-gradient(135deg, #060f09 0%, #13241b 50%, #1A3A2A 70%, #FF4500 100%)",  light: false },
-                    light: { key: "forest-light",  grad: "linear-gradient(135deg, #f4faf6 0%, #d8eedd 50%, #1A5C38 75%, #FF4500 100%)", light: true  },
-                  },
-                  {
-                    name: "Neon",
-                    dark:  { key: "neon",          grad: "linear-gradient(135deg, #0a0008 0%, #1c0020 50%, #FF007F 80%, #BAFF29 100%)",  light: false },
-                    light: { key: "neon-light",    grad: "linear-gradient(135deg, #fff5fa 0%, #ffd8ec 50%, #FF007F 78%, #BAFF29 100%)", light: true  },
-                  },
-                ] as { name: string; dark: { key: string; grad: string; light: boolean }; light: { key: string; grad: string; light: boolean } }[]).map(({ name, dark: dk, light: lk }) => (
-                  <div key={name}>
-                    <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>{name}</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      {[dk, lk].map(({ key, grad, light }) => {
-                        const isSelected = settings.theme === key;
-                        return (
-                          <button key={key} onClick={() => setSettings(s => ({ ...s, theme: key }))} style={{
-                            position: "relative", background: grad,
-                            border: isSelected ? `2px solid ${light ? "#555" : "#fff"}` : "2px solid transparent",
-                            borderRadius: 7, height: 44, cursor: "pointer", padding: 0, overflow: "hidden",
-                            outline: isSelected ? `2px solid ${light ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.3)"}` : "none",
-                            outlineOffset: 2, transition: "transform 0.12s", transform: isSelected ? "scale(1.04)" : "scale(1)",
-                          }}>
-                            <span style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 8, fontWeight: 700, letterSpacing: "0.06em", color: light ? "#222" : "#fff", textShadow: light ? "none" : "0 1px 3px rgba(0,0,0,0.9)", textTransform: "uppercase", fontFamily: "inherit" }}>{light ? "Light" : "Dark"}</span>
-                            {isSelected && <span style={{ position: "absolute", top: 3, right: 5, fontSize: 9, color: light ? "#333" : "#fff", lineHeight: 1 }}>✓</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
             {msg && <div style={{ fontSize: 12, color: msg.type === "ok" ? t.green : t.red }}>{msg.text}</div>}
