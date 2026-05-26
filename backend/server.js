@@ -912,6 +912,11 @@ app.post('/groups/:id/invite', authMiddleware, (req, res) => {
   ).get(groupId, targetUser.id);
   if (existing) return res.status(409).json({ error: 'Invite already pending' });
 
+  // Remove old processed (accepted/declined) records so we can re-invite
+  db.prepare(
+    "DELETE FROM group_join_requests WHERE group_id = ? AND to_user_id = ? AND status != 'pending'"
+  ).run(groupId, targetUser.id);
+
   try {
     const result = db.prepare(
       'INSERT INTO group_join_requests (group_id, from_user_id, to_user_id, status) VALUES (?,?,?,?)'
@@ -919,6 +924,7 @@ app.post('/groups/:id/invite', authMiddleware, (req, res) => {
     auditLog(req.user.id, req.user.username, 'group_invite', group.name, `invited=${targetUser.username}`, getClientIp(req));
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Invite already pending' });
     res.status(500).json({ error: e.message });
   }
 });
@@ -1128,7 +1134,8 @@ app.get('/configs', authMiddleware, (req, res) => {
 
   // All users (including admin) see only their own configs + group-shared configs
   const rows = db.prepare(`
-    SELECT DISTINCT sc.*, g.provision_root_path, gc.access_role FROM ssh_configs sc
+    SELECT DISTINCT sc.*, g.provision_root_path, gc.access_role,
+           gc.group_id as gc_group_id, g.name as group_name FROM ssh_configs sc
     LEFT JOIN group_configs gc ON gc.config_id = sc.id
     LEFT JOIN group_members gm ON gm.group_id = gc.group_id AND gm.user_id = ?
     LEFT JOIN groups g ON g.id = gc.group_id
