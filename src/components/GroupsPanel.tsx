@@ -25,14 +25,14 @@ export function GroupsPanel({ token, authUser, t, language, onLanguageChange, on
   const [tab, setTab] = useState<"my" | "invites">("my");
   const [showCreate, setShowCreate] = useState(false);
   const [createError, setCreateError] = useState("");
-  const [newGroup, setNewGroup] = useState({ name: "", description: "", provision_config_id: "", provision_root_path: "" });
+  const [newGroup, setNewGroup] = useState({ name: "", description: "", provision_config_id: "" });
   const [inviteModal, setInviteModal] = useState<{ groupId: number; groupName: string } | null>(null);
   const [inviteTarget, setInviteTarget] = useState("");
   const [inviteMsg, setInviteMsg] = useState("");
   const [expandedGroup, setExpandedGroup] = useState<number | null>(null);
   const [addServerModal, setAddServerModal] = useState<{ groupId: number; groupName: string } | null>(null);
   const [serverAccessRole, setServerAccessRole] = useState<AccessRole>("operator");
-  const [provisionModal, setProvisionModal] = useState<{ groupId: number; groupName: string; provision_config_id: string; provision_root_path: string } | null>(null);
+  const [provisionModal, setProvisionModal] = useState<{ groupId: number; groupName: string; provision_config_id: string } | null>(null);
   const [provisionLoading, setProvisionLoading] = useState(false);
   const [provisionMsg, setProvisionMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [sudoPassword, setSudoPassword] = useState("");
@@ -69,12 +69,11 @@ export function GroupsPanel({ token, authUser, t, language, onLanguageChange, on
     setCreateError("");
     const body: any = { name: newGroup.name, description: newGroup.description };
     if (newGroup.provision_config_id) body.provision_config_id = Number(newGroup.provision_config_id);
-    if (newGroup.provision_root_path) body.provision_root_path = newGroup.provision_root_path;
     const res = await fetch(`${API}/groups`, { method: "POST", headers: hdr, body: JSON.stringify(body) });
     const data = await res.json();
     if (res.ok) {
       setShowCreate(false);
-      setNewGroup({ name: "", description: "", provision_config_id: "", provision_root_path: "" });
+      setNewGroup({ name: "", description: "", provision_config_id: "" });
       setCreateError("");
       load();
     }
@@ -90,7 +89,6 @@ export function GroupsPanel({ token, authUser, t, language, onLanguageChange, on
       headers: hdr,
       body: JSON.stringify({
         provision_config_id: provisionModal.provision_config_id ? Number(provisionModal.provision_config_id) : undefined,
-        provision_root_path: provisionModal.provision_root_path || undefined,
         sudo_password: sudoPassword || undefined,
       }),
     });
@@ -251,7 +249,7 @@ export function GroupsPanel({ token, authUser, t, language, onLanguageChange, on
                     </div>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       {isOwner && (
-                        <button onClick={e => { e.stopPropagation(); const provisioned = (g as any).provisioned_at; setProvisionModal({ groupId: g.id, groupName: g.name, provision_config_id: String((g as any).provision_config_id || ""), provision_root_path: (g as any).provision_root_path || "" }); setProvisionMsg(null); }}
+                        <button onClick={e => { e.stopPropagation(); const provisioned = (g as any).provisioned_at; setProvisionModal({ groupId: g.id, groupName: g.name, provision_config_id: String((g as any).provision_config_id || "") }); setProvisionMsg(null); }}
                           style={{ background: (g as any).provisioned_at ? "transparent" : "transparent", border: `1px solid ${(g as any).provisioned_at ? t.border2 : t.border2}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, color: (g as any).provisioned_at ? (t.green || "#4caf50") : t.textDim, cursor: "pointer", fontFamily: "inherit" }}>
                           {(g as any).provisioned_at ? <><IconSettings size={11} color="currentColor" /> Provisioned</> : <><IconSettings size={11} color="currentColor" /> Provision</>}
                         </button>
@@ -402,7 +400,6 @@ export function GroupsPanel({ token, authUser, t, language, onLanguageChange, on
                     ))}
                   </select>
                 </div>
-                <Input t={t} placeholder="Директорія, напр. /home/jefrex/minecraft" value={newGroup.provision_root_path} onChange={v => setNewGroup(f => ({ ...f, provision_root_path: v }))} />
               </div>
             </div>
 
@@ -487,10 +484,7 @@ export function GroupsPanel({ token, authUser, t, language, onLanguageChange, on
                 value={provisionModal.provision_config_id}
                 onChange={e => {
                   const cfgId = e.target.value;
-                  const cfg = myConfigs.find(c => String(c.id) === cfgId);
-                  // Автоматично підставляємо домашню папку юзера як дефолт
-                  const defaultPath = cfg ? `/home/${cfg.username}` : "";
-                  setProvisionModal(m => m ? { ...m, provision_config_id: cfgId, provision_root_path: m.provision_root_path || defaultPath } : m);
+                  setProvisionModal(m => m ? { ...m, provision_config_id: cfgId } : m);
                 }}
                 style={{ background: t.bg2, border: `1px solid ${t.border2}`, borderRadius: 4, padding: "7px 10px", color: t.text, fontFamily: "inherit", fontSize: 12, outline: "none" }}
               >
@@ -500,13 +494,6 @@ export function GroupsPanel({ token, authUser, t, language, onLanguageChange, on
                 ))}
               </select>
             </div>
-
-            <Input
-              t={t}
-              placeholder={(() => { const cfg = myConfigs.find(c => String(c.id) === provisionModal.provision_config_id); return cfg ? `/home/${cfg.username}` : "Директорія (дефолт: /home/<user>)"; })()}
-              value={provisionModal.provision_root_path}
-              onChange={v => setProvisionModal(m => m ? { ...m, provision_root_path: v } : m)}
-            />
 
             <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
               <label style={{ fontSize: 10, color: t.textDim, textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>

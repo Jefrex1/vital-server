@@ -92,6 +92,7 @@ export function FileManager({
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const lastClickedRef = useRef<string | null>(null);
   const [primarySelected, setPrimarySelected] = useState<FileItem | null>(null);
+  const [dirSize, setDirSize] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<"files" | "editor" | "terminal">("files");
   const [editorContent, setEditorContent] = useState("");
@@ -271,16 +272,22 @@ export function FileManager({
         const [lo, hi] = [Math.min(idx1, idx2), Math.max(idx1, idx2)];
         const range = sortedFiles.slice(lo, hi + 1).map(f => f.name);
         setSelectedNames(prev => { const next = new Set(prev); range.forEach(n => next.add(n)); return next; });
-        setPrimarySelected(item); return;
+        setPrimarySelected(item); setDirSize(null); return;
       }
     }
     if (e.ctrlKey || e.metaKey) {
       setSelectedNames(prev => { const next = new Set(prev); next.has(name) ? next.delete(name) : next.add(name); return next; });
-      setPrimarySelected(item); lastClickedRef.current = name; return;
+      setPrimarySelected(item); lastClickedRef.current = name; setDirSize(null); return;
     }
     setSelectedNames(new Set([name]));
     setPrimarySelected(item);
     lastClickedRef.current = name;
+    setDirSize(null);
+    if (item.type === "dir") {
+      api("/files/dirsize", { path: joinPath(currentPath, item.name) })
+        .then((d: any) => setDirSize(d.size || null))
+        .catch(() => {});
+    }
   }
 
   function handleFileDoubleClick(item: FileItem) {
@@ -715,6 +722,11 @@ export function FileManager({
               )}
 
               {selectedNames.size > 0 && <span style={{ fontSize: 11, color: t.textDim, marginLeft: 4 }}>{selectedNames.size} selected</span>}
+              {primarySelected?.type === "dir" && (
+                <span style={{ fontSize: 11, color: t.textDim, marginLeft: 4 }}>
+                  {dirSize ? dirSize : "…"}
+                </span>
+              )}
             </div>
 
             {/* Content */}

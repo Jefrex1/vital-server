@@ -113,6 +113,19 @@ db.exec(`
   );
 `);
 
+// Migration: add saved_commands table
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS saved_commands (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      label       TEXT    NOT NULL,
+      command     TEXT    NOT NULL,
+      created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+  `);
+} catch(e) { console.error("[oServer] Migration error (saved_commands):", e.message); }
+
 // Create default admin if no users exist
 const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 if (userCount === 0) {
@@ -733,7 +746,8 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
   if (!cfgRow) return res.status(404).json({ error: 'SSH config not found' });
 
   // Якщо шлях не вказано — використовуємо домашню папку юзера як дефолт
-  const rootPath = req.body.provision_root_path || group.provision_root_path || `/home/${cfgRow.username}`;
+  const linuxUser = `vt_group_${group.id}`;
+  const rootPath = req.body.provision_root_path || group.provision_root_path || `/home/${linuxUser}`;
 
   if (req.user.role !== 'admin') {
     const hasAccess = cfgRow.owner_id === req.user.id || (cfgRow.group_id && db.prepare(
@@ -742,7 +756,6 @@ app.post('/groups/:id/provision', authMiddleware, async (req, res) => {
     if (!hasAccess) return res.status(403).json({ error: 'No access to this SSH config' });
   }
 
-  const linuxUser = `vt_group_${group.id}`;
   const sudoPassword = req.body.sudo_password || null;
   const sudo = (cmd) => sudoPassword
     ? `echo ${JSON.stringify(sudoPassword)} | sudo -S sh -c ${JSON.stringify(cmd)} 2>/dev/null`
@@ -1134,11 +1147,13 @@ app.get('/configs', authMiddleware, (req, res) => {
 
   // All users (including admin) see only their own configs + group-shared configs
   const rows = db.prepare(`
-    SELECT DISTINCT sc.*, g.provision_root_path, gc.access_role,
+    SELECT DISTINCT sc.*,
+           CASE WHEN sc.group_id IS NOT NULL THEN g.provision_root_path ELSE NULL END as provision_root_path,
+           gc.access_role,
            gc.group_id as gc_group_id, g.name as group_name FROM ssh_configs sc
     LEFT JOIN group_configs gc ON gc.config_id = sc.id
     LEFT JOIN group_members gm ON gm.group_id = gc.group_id AND gm.user_id = ?
-    LEFT JOIN groups g ON g.id = gc.group_id
+    LEFT JOIN groups g ON g.id = COALESCE(sc.group_id, gc.group_id)
     WHERE sc.owner_id = ?
       OR gm.user_id = ?
       OR (sc.owner_id IS NULL AND sc.group_id IS NULL)
@@ -1382,6 +1397,28 @@ app.post('/run', authMiddleware, async (req, res) => {
   finally { if (conn) conn.end(); }
 });
 
+
+// ─── Saved Commands ───────────────────────────────────────────────────────────
+app.get('/saved-commands', authMiddleware, (req, res) => {
+  const cmds = db.prepare('SELECT * FROM saved_commands WHERE user_id = ? ORDER BY id').all(req.user.id);
+  res.json(cmds);
+});
+
+app.post('/saved-commands', authMiddleware, (req, res) => {
+  const { label, command } = req.body;
+  if (!label || !command) return res.status(400).json({ error: 'label and command required' });
+  const r = db.prepare('INSERT INTO saved_commands (user_id, label, command) VALUES (?,?,?)').run(req.user.id, label.trim(), command.trim());
+  res.json({ id: r.lastInsertRowid, label: label.trim(), command: command.trim() });
+});
+
+app.delete('/saved-commands/:id', authMiddleware, (req, res) => {
+  const cmd = db.prepare('SELECT * FROM saved_commands WHERE id = ?').get(req.params.id);
+  if (!cmd) return res.status(404).json({ error: 'Not found' });
+  if (cmd.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+  db.prepare('DELETE FROM saved_commands WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 app.post('/files/list', authMiddleware, async (req, res) => {
   const resolved = await resolveConfig(req, res);
   if (!resolved) return;
@@ -1582,6 +1619,22 @@ app.post('/files/upload', authMiddleware, upload.single('file'), async (req, res
     auditLog(req.user.id, req.user.username, 'upload_file', destPath, `size=${req.file.size}`, getClientIp(req));
     res.json({ ok: true, path: destPath });
   } catch (err) { res.status(500).json({ error: err.message }); }
+  finally { if (conn) conn.end(); }
+});
+
+
+app.post('/files/dirsize', authMiddleware, async (req, res) => {
+  const resolved = await resolveConfig(req, res);
+  if (!resolved) return;
+  const { cfg } = resolved;
+  const { path } = req.body;
+  if (!path) return res.status(400).json({ error: 'path required' });
+  let conn;
+  try {
+    conn = await sshConnect(cfg);
+    const { stdout } = await sshExec(conn, `du -sh "${path}" 2>/dev/null | cut -f1`);
+    res.json({ size: stdout.trim() || '0' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
   finally { if (conn) conn.end(); }
 });
 
