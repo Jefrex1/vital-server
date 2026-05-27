@@ -12,9 +12,10 @@ interface RichPreviewProps {
   token: string;
   currentPath: string;
   t: typeof THEMES.dark;
+  dirSize?: string | null;  // real dir size from backend
 }
 
-export function RichPreview({ item, config, token, currentPath, t }: RichPreviewProps) {
+export function RichPreview({ item, config, token, currentPath, t, dirSize }: RichPreviewProps) {
   const [previewData, setPreviewData] = useState<
     | { kind: "text"; content: string }
     | { kind: "image"; url: string }
@@ -39,7 +40,6 @@ export function RichPreview({ item, config, token, currentPath, t }: RichPreview
   }
 
   useEffect(() => {
-    // Revoke previous blob URL to free memory
     if (prevUrlRef.current) {
       URL.revokeObjectURL(prevUrlRef.current);
       prevUrlRef.current = null;
@@ -101,11 +101,18 @@ export function RichPreview({ item, config, token, currentPath, t }: RichPreview
     }
   }, [item?.name, currentPath]); // eslint-disable-line
 
-  // Warn for large video files before loading
-  const isLargeFile = (item?.size ?? 0) > 200 * 1024 * 1024; // 200MB
+  const isLargeFile = (item?.size ?? 0) > 200 * 1024 * 1024;
   const [largeDismissed, setLargeDismissed] = useState(false);
-
   useEffect(() => { setLargeDismissed(false); }, [item?.name]);
+
+  // For dirs: show real dirSize from backend, or "…" while loading, or "—" for files with size 0
+  function displaySize(): string {
+    if (item?.type === "dir") {
+      if (dirSize) return dirSize;
+      return "…";
+    }
+    return formatSize(item?.size ?? 0);
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -115,96 +122,51 @@ export function RichPreview({ item, config, token, currentPath, t }: RichPreview
         flex: 1, background: t.previewBg, display: "flex", alignItems: "center",
         justifyContent: "center", overflow: "hidden", position: "relative", minHeight: 0,
       }}>
-        {loading && (
-          <div style={{ fontSize: 11, color: t.textDim }}>Loading…</div>
-        )}
+        {loading && <div style={{ fontSize: 11, color: t.textDim }}>Loading…</div>}
 
-        {/* Image */}
         {!loading && previewData?.kind === "image" && (
-          <img
-            src={(previewData as any).url}
-            alt={item?.name}
-            style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-          />
+          <img src={(previewData as any).url} alt={item?.name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
         )}
 
-        {/* Audio player */}
         {!loading && previewData?.kind === "media" && (previewData as any).mediaType === "audio" && (
-          <div style={{
-            display: "flex", flexDirection: "column", alignItems: "center",
-            gap: 14, padding: "20px 16px", width: "100%",
-          }}>
-            {/* Music icon */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "20px 16px", width: "100%" }}>
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={t.accent} strokeWidth="1.5">
               <path d="M9 18V5l12-2v13" />
               <circle cx="6" cy="18" r="3" />
               <circle cx="18" cy="16" r="3" />
             </svg>
-            <div style={{ fontSize: 11, color: t.textDim, textAlign: "center", wordBreak: "break-all", padding: "0 8px" }}>
-              {item?.name}
-            </div>
-            <audio
-              controls
-              autoPlay={false}
-              src={(previewData as any).url}
-              style={{ width: "100%", maxWidth: 220, accentColor: t.accent }}
-            />
+            <div style={{ fontSize: 11, color: t.textDim, textAlign: "center", wordBreak: "break-all", padding: "0 8px" }}>{item?.name}</div>
+            <audio controls autoPlay={false} src={(previewData as any).url} style={{ width: "100%", maxWidth: 220, accentColor: t.accent }} />
           </div>
         )}
 
-        {/* Video player */}
         {!loading && previewData?.kind === "media" && (previewData as any).mediaType === "video" && (
-          <video
-            controls
-            autoPlay={false}
-            src={(previewData as any).url}
-            style={{
-              maxWidth: "100%", maxHeight: "100%",
-              objectFit: "contain", background: "#000",
-              borderRadius: 4,
-            }}
-          />
+          <video controls autoPlay={false} src={(previewData as any).url} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", background: "#000", borderRadius: 4 }} />
         )}
 
-        {/* Large file warning (video/audio before load) */}
         {!loading && previewData?.kind === "none" && item &&
           (isVideoFile(item.name) || isAudioFile(item.name)) &&
           isLargeFile && !largeDismissed && (
-          <div style={{
-            display: "flex", flexDirection: "column", alignItems: "center",
-            gap: 10, padding: 20, textAlign: "center",
-          }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 20, textAlign: "center" }}>
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={t.yellow} strokeWidth="1.5">
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
               <line x1="12" y1="9" x2="12" y2="13" />
               <line x1="12" y1="17" x2="12.01" y2="17" />
             </svg>
             <div style={{ fontSize: 11, color: t.textDim }}>File is large ({formatSize(item.size)}). Load anyway?</div>
-            <button
-              onClick={() => { setLargeDismissed(true); }}
-              style={{ background: t.accent, border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 11, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}
-            >
-              Load
-            </button>
+            <button onClick={() => setLargeDismissed(true)} style={{ background: t.accent, border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 11, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>Load</button>
           </div>
         )}
 
-        {/* Text preview */}
         {!loading && previewData?.kind === "text" && (
           <div style={{ position: "absolute", inset: 0, overflow: "auto", padding: 10, background: t.previewTextBg }}>
-            <pre style={{
-              fontSize: 10, lineHeight: 1.5, color: t.previewTextColor,
-              fontFamily: "'Roboto Mono', monospace", margin: 0,
-              whiteSpace: "pre-wrap", wordBreak: "break-all",
-            }}>
+            <pre style={{ fontSize: 10, lineHeight: 1.5, color: t.previewTextColor, fontFamily: "'Roboto Mono', monospace", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
               {(previewData as any).content.slice(0, 4000)}
             </pre>
           </div>
         )}
 
-        {/* Generic icon fallback */}
-        {!loading && (!previewData || previewData.kind === "none") && item &&
-          !isLargeFile && (
+        {!loading && (!previewData || previewData.kind === "none") && item && !isLargeFile && (
           <FileIcon item={item} size={52} t={t} />
         )}
         {!loading && !item && (
@@ -224,7 +186,7 @@ export function RichPreview({ item, config, token, currentPath, t }: RichPreview
           </div>
           {[
             ["type", item.type],
-            ["size", formatSize(item.size)],
+            ["size", displaySize()],
             ["modified", item.modified ? new Date(item.modified).toLocaleDateString("uk-UA") : "—"],
             ["perms", item.permissions || "—"],
           ].map(([k, v]) => (

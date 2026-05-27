@@ -1,25 +1,22 @@
 {
-  "name": "web-ssh",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "oserver-backend",
+  "version": "2.0.0",
+  "description": "oServer — SSH File Manager backend (refactored)",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "bcrypt": "^6.0.0",
+    "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.10.0",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "multer": "^2.1.1",
-    "node-ssh": "^13.2.1",
-    "socket.io": "^4.8.3",
+    "multer": "^1.4.5-lts.1",
     "ssh2": "^1.17.0",
     "swagger-ui-express": "^5.0.1",
-    "ws": "^8.20.1"
+    "ws": "^8.21.0"
   }
 }
