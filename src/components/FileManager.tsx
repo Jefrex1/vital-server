@@ -722,11 +722,6 @@ export function FileManager({
               )}
 
               {selectedNames.size > 0 && <span style={{ fontSize: 11, color: t.textDim, marginLeft: 4 }}>{selectedNames.size} selected</span>}
-              {primarySelected?.type === "dir" && (
-                <span style={{ fontSize: 11, color: t.textDim, marginLeft: 4 }}>
-                  {dirSize ? dirSize : "…"}
-                </span>
-              )}
             </div>
 
             {/* Content */}
@@ -773,7 +768,7 @@ export function FileManager({
                   </div>
                   {showPreview && (
                     <div style={{ width: previewW, background: t.bg2, borderLeft: `1px solid ${t.border}`, display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
-                      <RichPreview item={primarySelected} config={config} token={token} currentPath={currentPath} t={t} />
+                      <RichPreview item={primarySelected} config={config} token={token} currentPath={currentPath} t={t} dirSize={dirSize} />
                     </div>
                   )}
                 </div>

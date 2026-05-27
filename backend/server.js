@@ -47,15 +47,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors(corsOptions));
 
 // ─── Swagger ──────────────────────────────────────────────────────────────────
-const swaggerSpec = {
-  openapi: '3.0.0',
-  info: { title: 'oServer API', version: '2.0.0', description: 'SSH File Manager & Terminal API' },
-  servers: [{ url: `http://localhost:${process.env.PORT || 3001}` }],
-  components: {
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
-  },
-  security: [{ bearerAuth: [] }],
-};
+const swaggerSpec = require('./swagger');
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
 
