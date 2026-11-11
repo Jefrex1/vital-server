@@ -1,81 +1,96 @@
-# oServer — SSH File Manager
+# oServer: Web-based SSH Server Manager
 
-## Структура проекту
+A full-stack web application for managing Linux servers over SSH straight from the browser: a terminal, a file manager, system metrics and user management in one place.
+
+![Screenshot](docs/screenshot.png)
+
+## Features
+
+- **SSH terminal in the browser**, powered by WebSockets
+- **SFTP file manager** with a built-in text editor, upload and download
+- **System metrics**: CPU/GPU temperature, RAM and disk usage
+- **Authentication** with JWT and **role-based access control (RBAC)**
+- **Audit logging** of user actions
+- **AES-256-GCM encryption** for sensitive data
+- **Groups and provisioning** system for managing users
+- **Internationalization (i18n)**
+- **Interactive API docs** with Swagger UI
+
+## Tech Stack
+
+| Layer    | Technologies                                    |
+| -------- | ----------------------------------------------- |
+| Frontend | Next.js, React, TypeScript, Tailwind CSS        |
+| Backend  | Node.js, Express, ssh2, WebSockets              |
+| Database | SQLite                                          |
+| Auth     | JWT                                             |
+
+## Project Structure
 
 ```
-project/
-├── server.js          ← Node.js бекенд (SSH + SFTP)
-├── FileManager.tsx    ← React компонент (Next.js / Vite)
-└── README.md
+├── app/        # Next.js App Router pages and layouts
+├── src/        # Frontend components and logic
+├── public/     # Static assets
+└── backend/    # Express API (SSH, SFTP, auth, database)
 ```
 
-## Встановлення бекенду
+## Getting Started
+
+### Prerequisites
+
+- Node.js <version>
+- A Linux server with SSH access
+
+### Installation
 
 ```bash
-npm init -y
-npm install express cors ssh2 multer
-node server.js
+git clone https://github.com/Jefrex1/vital-server.git
+cd vital-server
+npm install
 ```
 
-Бекенд запуститься на **http://localhost:3001**
+### Environment variables
 
-## Встановлення фронтенду
+Create a `.env` file based on the example below:
 
-### Next.js (App Router)
-
-1. Скопіюй `FileManager.tsx` в `app/page.tsx` або `components/FileManager.tsx`
-2. Встанови шрифт у `app/layout.tsx`:
-   ```tsx
-   import { Roboto_Mono } from 'next/font/google'
-   const mono = Roboto_Mono({ subsets: ['latin'] })
-   ```
-3. Запусти: `npm run dev`
-
-### Vite + React
-
-1. Скопіюй `FileManager.tsx` в `src/App.tsx`
-2. `npm run dev`
-
-## API Endpoints
-
-| Endpoint | Опис |
-|---|---|
-| `POST /run` | Виконати довільну SSH команду |
-| `POST /files/list` | Список файлів в директорії |
-| `POST /files/read` | Прочитати текстовий файл |
-| `POST /files/write` | Зберегти файл |
-| `POST /files/delete` | Видалити файл / директорію |
-| `POST /files/rename` | Перейменувати / перемістити |
-| `POST /files/mkdir` | Створити директорію |
-| `POST /files/download` | Скачати файл (SFTP stream) |
-| `POST /files/upload` | Завантажити файл (multipart) |
-| `POST /files/tree` | Дерево директорій для сайдбару |
-| `POST /system/metrics` | CPU/GPU temp, RAM, диски |
-
-## Тіло запиту (для всіх endpoints)
-
-```json
-{
-  "host": "127.0.0.1",
-  "port": 22,
-  "username": "jefrex",
-  "password": "your_password",
-  // + endpoint-специфічні поля
-}
+```env
+# Add your real variable names here
+JWT_SECRET=<your-secret>
+ENCRYPTION_KEY=<32-byte-key>
 ```
 
-## Функції FileManager
+### Run
 
-- **Файловий менеджер** — grid перегляд, подвійний клік для входу в папку
-- **Редактор** — вбудований текстовий редактор з збереженням
-- **Термінал** — SSH термінал прямо в браузері
-- **Upload/Download** — через SFTP
-- **Метрики** — CPU, GPU температура, RAM, диски (оновлюється кожні 4с)
-- **Дерево** — авто-завантаження структури папок в сайдбар
-- **Пошук** — фільтрація файлів в реальному часі
+```bash
+# Backend (default: http://localhost:3001)
+cd backend
+npm install
+npm start
 
-## Примітки
+# Frontend (in a second terminal, from the project root)
+npm run dev
+```
 
-- GPU температура потребує `nvidia-smi` на сервері
-- CPU температура читається з `/sys/class/thermal/thermal_zone0/temp`
-- Для продакшн-використання — додай JWT аутентифікацію та HTTPS
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## API Documentation
+
+Swagger UI is available at `<http://localhost:3001/api-docs>` while the backend is running.
+
+## Requirements on the managed server
+
+- GPU temperature requires `nvidia-smi`
+- CPU temperature is read from `/sys/class/thermal/thermal_zone0/temp`
+
+## Security notes
+
+- Always run behind **HTTPS** in production
+- Use a strong, unique `JWT_SECRET` and `ENCRYPTION_KEY`, and never commit your `.env` file
+
+## Background
+
+Started as a monolithic SSH file manager and grew into a modular application with security hardening, role-based access and a full API. Built as my bachelor's diploma project.
+
+## Author
+
+**Orest**: [GitHub](https://github.com/Jefrex1)
